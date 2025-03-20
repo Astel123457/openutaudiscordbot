@@ -1,4 +1,5 @@
 import discord
+from discord.ext import commands
 import os
 import json
 token = "ODg5NzExMTgzMzEyMDgwOTQ3.GzMPBY.xJ2f4kSQ-eRLy5r_cRkqyyTfth8SIy38pW9cEE"
@@ -12,7 +13,7 @@ with open("config.json", "r") as f:
     config = json.load(f)
     print(config)
 
-client = discord.Client(intents=intents, status=discord.Status.online)
+client = commands.Bot(command_prefix='!', intents=intents, status=discord.Status.online)
 @client.event
 async def on_ready():
     print("Client has started")
