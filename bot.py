@@ -30,6 +30,7 @@ async def on_message(message):
 
 @client.event
 async def set_image(ctx: discord.Interaction, command: str):
+    print("Setting image")
     conf = config.get(command, None) # example is the name of the command that you are making
     conf["has_image"] = True
     image_path = await ctx.attachments[0].save(ctx.attachements[0].filename) # this is the image that is being sent
@@ -49,6 +50,7 @@ async def example(ctx: discord.Interaction): #this command is not exposed to the
 
 @client.event
 async def mrbeast(ctx):
+    print("MRBEAST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
     conf = config.get("mrbeast", None) # example is the name of the command that you are making
     ctx.send(file=discord.File(conf["image"])) # this is if the command has an image/gif/whatever
     
