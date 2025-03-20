@@ -10,6 +10,7 @@ if not os.path.exists("config.json"):
         json.dump({"":""}, f)
 with open("config.json", "r") as f:
     config = json.load(f)
+    print(config)
 
 client = discord.Client(intents=intents, status=discord.Status.online)
 @client.event
