@@ -29,12 +29,11 @@ async def on_message(message):
         await message.channel.send(embed=embed)
 
 @client.event
-async def set_image(ctx, command):
+async def set_image(ctx: discord.Interaction, command: str):
     conf = config.get(command, None) # example is the name of the command that you are making
-    if conf is not None:
-        has_image = conf.get("has_image", None) # this is only if the command has a file that goes with it
-        if has_image is None:
-            conf["has_image"] = False
+    conf["has_image"] = True
+    image_path = await ctx.attachments[0].save(ctx.attachements[0].filename) # this is the image that is being sent
+    conf["image"] = ctx.attachements[0].filename
 
 async def example(ctx: discord.Interaction): #this command is not exposed to the user
     conf = config.get("example", None) # example is the name of the command that you are making
@@ -48,7 +47,9 @@ async def example(ctx: discord.Interaction): #this command is not exposed to the
     else:
         ctx.send("whatever needs to be sent here, such as links, info on what to do ext, could use config to store this info") # this is if the command does not have an image/gif/whatever
 
-
-            
+@client.event
+async def mrbeast(ctx):
+    conf = config.get("mrbeast", None) # example is the name of the command that you are making
+    ctx.send(file=discord.File(conf["image"])) # this is if the command has an image/gif/whatever
     
 client.run(token)
