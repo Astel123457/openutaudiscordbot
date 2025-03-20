@@ -29,7 +29,7 @@ async def on_message(message):
         embed.add_field(name="Have issues? Send them here! (Or in #help-en)", value="https://github.com/stakira/OpenUtau/issues", inline=False)
         await message.channel.send(embed=embed)
 
-@client.event
+@client.command()
 async def set_image(ctx: discord.Interaction, command: str):
     print("Setting image")
     conf = config.get(command, None) # example is the name of the command that you are making
@@ -49,7 +49,7 @@ async def example(ctx: discord.Interaction): #this command is not exposed to the
     else:
         ctx.send("whatever needs to be sent here, such as links, info on what to do ext, could use config to store this info") # this is if the command does not have an image/gif/whatever
 
-@client.event
+@client.command()
 async def mrbeast(ctx):
     print("MRBEAST!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
     conf = config.get("mrbeast", None) # example is the name of the command that you are making
