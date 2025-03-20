@@ -1,1 +1,9 @@
+.pebblegit
+pebblehost.yml
+logs
+.env
+.template
+pebble-python-config.json
+requirements.txt
+.gitlog.txt
 config.json
