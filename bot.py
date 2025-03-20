@@ -49,7 +49,7 @@ async def on_message(message):
 
 @client.command()
 async def set_image(ctx: discord.Interaction, command: str):
-    print("Setting image")
+    
     conf = config.get(command, None)  # example is the name of the command that you are making
     if conf is None:
         config[command] = {}
@@ -61,6 +61,8 @@ async def set_image(ctx: discord.Interaction, command: str):
     # Write the updated config to config.json
     with open("config.json", "w") as f:
         json.dump(config, f)
+
+    await ctx.send(f"The image for the command `{command}` has been set successfully!")
 
 async def example(ctx: discord.Interaction): #this command is not exposed to the user
     conf = config.get("example", None) # example is the name of the command that you are making
