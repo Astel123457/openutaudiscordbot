@@ -55,6 +55,9 @@ async def set_image(ctx: discord.Interaction, command: str):
         config[command] = {}
         conf = config.get(command, None)
     conf["has_image"] = True
+    if len(ctx.message.attachments) == 0:
+        await ctx.send("You must provide an image. (Links are not supported at this time)")
+        return
     image_path = await ctx.message.attachments[0].save(ctx.message.attachments[0].filename)  # this is the image that is being sent
     conf["image"] = ctx.message.attachments[0].filename
 
@@ -63,6 +66,20 @@ async def set_image(ctx: discord.Interaction, command: str):
         json.dump(config, f)
 
     await ctx.send(f"The image for the command `{command}` has been set successfully!")
+
+@client.command()
+async def set_info(ctx: discord.Interaction, command: str, *, info: str):
+    conf = config.get(command, None)
+    if conf is None:
+        await ctx.send(f"The command `{command}` does not exist.")
+        return
+    
+    conf["info"] = info
+    # Write the updated config to config.json
+    with open("config.json", "w") as f:
+        json.dump(config, f)
+        
+    await ctx.send(f"The info for the command `{command}` has been set successfully!")
 
 async def example(ctx: discord.Interaction): #this command is not exposed to the user
     conf = config.get("example", None) # example is the name of the command that you are making
