@@ -4,7 +4,8 @@ import os
 import json
 token = "ODg5NzExMTgzMzEyMDgwOTQ3.GzMPBY.xJ2f4kSQ-eRLy5r_cRkqyyTfth8SIy38pW9cEE"
 
-intents = discord.Intents(value=274877974528)
+intents = discord.Intents().default()
+intents.message_content = True
 if not os.path.exists("config.json"):
     with open("config.json", "w") as f:
         json.dump({"":""}, f)
