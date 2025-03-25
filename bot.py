@@ -4,8 +4,7 @@ import os
 import json
 token = "ODg5NzExMTgzMzEyMDgwOTQ3.GzMPBY.xJ2f4kSQ-eRLy5r_cRkqyyTfth8SIy38pW9cEE"
 
-intents = discord.Intents.default()
-intents.message_content = True
+intents = discord.Intents(value=274877974528)
 if not os.path.exists("config.json"):
     with open("config.json", "w") as f:
         json.dump({"":""}, f)
@@ -78,20 +77,9 @@ async def set_info(ctx: discord.Interaction, command: str, *, info: str):
     # Write the updated config to config.json
     with open("config.json", "w") as f:
         json.dump(config, f)
-        
+
     await ctx.send(f"The info for the command `{command}` has been set successfully!")
 
-async def example(ctx: discord.Interaction): #this command is not exposed to the user
-    conf = config.get("example", None) # example is the name of the command that you are making
-    if conf is not None:
-        has_image = conf.get("has_image", None) # this is only if the command has a file that goes with it
-        if has_image is None:
-            conf["has_image"] = False
-    else: has_image = False
-    if has_image:
-        ctx.send("whatever needs to be sent here, such as links, info on what to do ext, could use config to store this info, can be blank if an image is being sent", file=discord.File(conf["image"])) # this is if the command has an image/gif/whatever
-    else:
-        ctx.send("whatever needs to be sent here, such as links, info on what to do ext, could use config to store this info") # this is if the command does not have an image/gif/whatever
 @client.command()
 async def make_command(ctx: discord.Interaction, command: str, *, info: str = None):
     print("Making command")
@@ -114,7 +102,14 @@ async def make_command(ctx: discord.Interaction, command: str, *, info: str = No
     with open("config.json", "w") as f:
         json.dump(config, f)
     await ctx.send(f"The command `{command}` has been created successfully!")
-
+    
+@client.command()
+async def list_commands(ctx: discord.Interaction):
+    command_list = [cmd for cmd in config.keys() if cmd not in ["make_command", "set_info", "set_image"]]
+    if not command_list:
+        await ctx.send("No commands have been created yet.")
+    else:
+        commands_str = "\n".join(command_list)
+        await ctx.send(f"Here are the available commands:\n{commands_str}")
 
 client.run(token)
-
