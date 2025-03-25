@@ -105,6 +105,28 @@ async def make_command(ctx: discord.Interaction, command: str, *, info: str = No
     await ctx.send(f"The command `{command}` has been created successfully!")
     
 @client.command()
+async def remove_command(ctx: discord.Interaction, command: str):
+    if command not in config:
+        await ctx.send(f"The command `{command}` does not exist.")
+        return
+    
+    # Remove the command from the config
+
+    removed_command = config.pop(command)
+
+    # Delete associated image file if it exists
+    if removed_command.get("has_image") and "image" in removed_command:
+        image_path = removed_command["image"]
+        if os.path.exists(image_path):
+            os.remove(image_path)
+
+    # Write the updated config to config.json
+    with open("config.json", "w") as f:
+        json.dump(config, f)
+
+    await ctx.send(f"The command `{command}` has been removed successfully!")
+
+@client.command()
 async def list_commands(ctx: discord.Interaction):
     command_list = [cmd for cmd in config.keys() if cmd not in ["make_command", "set_info", "set_image"]]
     if not command_list:
