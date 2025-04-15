@@ -8,9 +8,11 @@ intents = discord.Intents().default()
 intents.message_content = True
 if not os.path.exists("config.json"):
     with open("config.json", "w") as f:
-        json.dump({"":""}, f)
+        json.dump({"moderators":[493626802644713473]}, f)
 with open("config.json", "r") as f:
     config = json.load(f)
+
+
 
 client = commands.Bot(command_prefix='!', intents=intents, status=discord.Status.online)
 @client.event
@@ -49,7 +51,9 @@ async def on_message(message):
 
 @client.command()
 async def set_image(ctx: discord.Interaction, command: str):
-    
+    if ctx.author.id not in config["moderators"]:
+        await ctx.send("You do not have permission to use this command.")
+        return
     conf = config.get(command, None)  # example is the name of the command that you are making
     if conf is None:
         config[command] = {}
@@ -69,6 +73,9 @@ async def set_image(ctx: discord.Interaction, command: str):
 
 @client.command()
 async def set_info(ctx: discord.Interaction, command: str, *, info: str):
+    if ctx.author.id not in config["moderators"]:
+        await ctx.send("You do not have permission to use this command.")
+        return
     conf = config.get(command, None)
     if conf is None:
         await ctx.send(f"The command `{command}` does not exist.")
@@ -83,8 +90,10 @@ async def set_info(ctx: discord.Interaction, command: str, *, info: str):
 
 @client.command()
 async def make_command(ctx: discord.Interaction, command: str, *, info: str = None):
-    print("Making command")
-    print(config)
+    if ctx.author.id not in config["moderators"]:
+        await ctx.send("You do not have permission to use this command.")
+        return
+    
     if command in config:
         await ctx.send(f"The command `{command}` already exists.")
         return
@@ -106,6 +115,9 @@ async def make_command(ctx: discord.Interaction, command: str, *, info: str = No
     
 @client.command()
 async def remove_command(ctx: discord.Interaction, command: str):
+    if ctx.author.id not in config["moderators"]:
+        await ctx.send("You do not have permission to use this command.")
+        return
     if command not in config:
         await ctx.send(f"The command `{command}` does not exist.")
         return
@@ -125,6 +137,22 @@ async def remove_command(ctx: discord.Interaction, command: str):
         json.dump(config, f)
 
     await ctx.send(f"The command `{command}` has been removed successfully!")
+
+@client.command()
+async def add_bot_moderator(ctx: discord.Interaction, user: discord.User):
+    if ctx.author.id not in config["moderators"]:
+        await ctx.send("You do not have permission to use this command.")
+        return
+
+    if user.id in config["moderators"]:
+        await ctx.send(f"{user.name} is already a moderator.")
+        return
+
+    config["moderators"].append(user.id)
+    with open("config.json", "w") as f:
+        json.dump(config, f)
+
+    await ctx.send(f"{user.name} has been added as a moderator.")
 
 @client.command()
 async def list_commands(ctx: discord.Interaction):
