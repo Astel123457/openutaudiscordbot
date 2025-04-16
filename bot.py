@@ -160,6 +160,28 @@ async def add_bot_moderator(ctx: discord.Interaction, user: discord.User):
     await ctx.send(f"{user.name} has been added as a moderator.")
 
 @client.command()
+async def rename_command(ctx: discord.Interaction, old_name: str, new_name: str):
+    if ctx.author.id not in config["moderators"]:
+        await ctx.send("You do not have permission to use this command.")
+        return
+
+    if old_name not in config:
+        await ctx.send(f"The command `{old_name}` does not exist.")
+        return
+
+    if new_name in config:
+        await ctx.send(f"The command `{new_name}` already exists.")
+        return
+
+    config[new_name] = config.pop(old_name)
+
+    # Write the updated config to config.json
+    with open("config.json", "w") as f:
+        json.dump(config, f)
+
+    await ctx.send(f"The command `{old_name}` has been renamed to `{new_name}` successfully!")
+
+@client.command()
 async def list_commands(ctx: discord.Interaction):
     command_list = [cmd for cmd in config.keys() if cmd not in ["make_command", "set_info", "set_image"]]
     if not command_list:
