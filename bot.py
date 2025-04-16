@@ -14,7 +14,9 @@ with open("config.json", "r") as f:
 
 
 
-client = commands.Bot(command_prefix='!', intents=intents, status=discord.Status.online)
+client = commands.Bot(command_prefix='!', intents=intents, status=discord.Status.online, activity=discord.Activity(type=discord.ActivityType.custom, name="Use !help or ping me!"))
+client.remove_command("help")
+
 @client.event
 async def on_ready():
     print("Client has started")
@@ -114,9 +116,12 @@ async def make_command(ctx: discord.Interaction, command: str, *, info: str = No
     await ctx.send(f"The command `{command}` has been created successfully!")
     
 @client.command()
-async def remove_command(ctx: discord.Interaction, command: str):
+async def remove_command(ctx: discord.Interaction, command: str = None):
     if ctx.author.id not in config["moderators"]:
         await ctx.send("You do not have permission to use this command.")
+        return
+    if command is None:
+        await ctx.send("You must provide a command to remove.")
         return
     if command not in config:
         await ctx.send(f"The command `{command}` does not exist.")
