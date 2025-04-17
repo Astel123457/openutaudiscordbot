@@ -182,6 +182,10 @@ async def rename_command(ctx: discord.Interaction, old_name: str, new_name: str)
     await ctx.send(f"The command `{old_name}` has been renamed to `{new_name}` successfully!")
 
 @client.command()
+async def vccv(ctx: discord.Interaction):
+    await ctx.send("<@1102297012709359716>")
+
+@client.command()
 async def list_commands(ctx: discord.Interaction):
     command_list = [cmd for cmd in config.keys() if cmd not in ["make_command", "set_info", "set_image", "moderators"]]
     if not command_list:
