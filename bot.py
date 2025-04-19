@@ -171,8 +171,7 @@ async def moderators(ctx: discord.Interaction):
     else:
         for user_id in moderator_list:
             print(await client.fetch_user(user_id))
-            print(discord.User(user_id).name)
-        moderators_str = "\n".join([f"{ctx.guild.get_member(int(user_id)).name} (ID: {user_id})" if ctx.guild.get_member(int(user_id)) else f"Unknown User (ID: {user_id})" for user_id in moderator_list])
+        moderators_str = "\n".join([f"{await client.fetch_user(user_id).name} (ID: {user_id})" if await client.fetch_user(user_id) else f"Unknown User (ID: {user_id})" for user_id in moderator_list])
         await ctx.send(f"Here are the current moderators:\n\n{moderators_str}")
 
 @client.command()
