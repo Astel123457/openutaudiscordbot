@@ -25,7 +25,7 @@ async def on_ready():
 async def on_message(message):
     if message.author == client.user:
         return
-    if message.content.startswith('!'):
+    if message.content.startswith('!') and not message.content.startswith('!moderators'):
         command_name = message.content[1:].split()[0]  # Extract command name
         conf = config.get(command_name, None)
         if conf is not None:  # Continue processing if the command exists
@@ -158,7 +158,7 @@ async def add_bot_moderator(ctx: discord.Interaction, user: discord.User):
         json.dump(config, f)
 
     await ctx.send(f"{user.name} has been added as a moderator.")
-    
+
 @client.command()
 async def moderators(ctx: discord.Interaction):
     if ctx.author.id not in config["moderators"]:
