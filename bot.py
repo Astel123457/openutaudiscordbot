@@ -165,13 +165,13 @@ async def moderators(ctx: discord.Interaction):
         await ctx.send("You do not have permission to use this command.")
         return
 
-    moderator_list = [str(user_id) for user_id in config["moderators"]]
+    moderator_list = [user_id for user_id in config["moderators"]]
     if not moderator_list:
         await ctx.send("No moderators have been added yet.")
     else:
         for user_id in moderator_list:
             print(user_id)
-            print(discord.User(int(user_id)).name)
+            print(discord.User(user_id).name)
         moderators_str = "\n".join([f"{ctx.guild.get_member(int(user_id)).name} (ID: {user_id})" if ctx.guild.get_member(int(user_id)) else f"Unknown User (ID: {user_id})" for user_id in moderator_list])
         await ctx.send(f"Here are the current moderators:\n\n{moderators_str}")
 
