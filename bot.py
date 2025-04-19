@@ -158,7 +158,8 @@ async def add_bot_moderator(ctx: discord.Interaction, user: discord.User):
         json.dump(config, f)
 
     await ctx.send(f"{user.name} has been added as a moderator.")
-
+    
+@client.command()
 async def moderators(ctx: discord.Interaction):
     if ctx.author.id not in config["moderators"]:
         await ctx.send("You do not have permission to use this command.")
