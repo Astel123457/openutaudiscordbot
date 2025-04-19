@@ -159,6 +159,18 @@ async def add_bot_moderator(ctx: discord.Interaction, user: discord.User):
 
     await ctx.send(f"{user.name} has been added as a moderator.")
 
+async def moderators(ctx: discord.Interaction):
+    if ctx.author.id not in config["moderators"]:
+        await ctx.send("You do not have permission to use this command.")
+        return
+
+    moderator_list = [str(user_id) for user_id in config["moderators"]]
+    if not moderator_list:
+        await ctx.send("No moderators have been added yet.")
+    else:
+        moderators_str = "\n".join(moderator_list)
+        await ctx.send(f"Here are the current moderators:\n\n{moderators_str}")
+
 @client.command()
 async def rename_command(ctx: discord.Interaction, old_name: str, new_name: str):
     if ctx.author.id not in config["moderators"]:
