@@ -169,9 +169,13 @@ async def moderators(ctx: discord.Interaction):
     if not moderator_list:
         await ctx.send("No moderators have been added yet.")
     else:
+        mods = []
         for user_id in moderator_list:
-            print(await client.fetch_user(user_id))
-        moderators_str = "\n".join([f"{await client.fetch_user(user_id).name} (ID: {user_id})" if await client.fetch_user(user_id) else f"Unknown User (ID: {user_id})" for user_id in moderator_list])
+            try:
+                mods.append(f"{await client.fetch_user(user_id)}: (ID:{user_id})")
+            except discord.NotFound:
+                mods.append(f"Unknown User: (ID:{user_id})")
+        moderators_str = "\n".join(mods)
         await ctx.send(f"Here are the current moderators:\n\n{moderators_str}")
 
 @client.command()
