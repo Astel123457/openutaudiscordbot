@@ -218,10 +218,11 @@ async def list_commands(ctx: discord.Interaction, page: int = 1):
     if not command_list:
         await ctx.send("No commands have been created yet.")
     else:
-        if page >= num_pages:
+        if page >= num_pages + 1 or page < 0:
             await ctx.send(f"Invalid page number. There are only {num_pages + 1} pages.")
             return
         commands_str = "\n".join(pages[page - 1])
+        print(page)
         await ctx.send(f"Here are the available commands:\n\n{commands_str}\n\nPage {page + 1}/{num_pages + 1}. Use `!list_commands <page number>` to change the page.")
 
 client.run(token)
