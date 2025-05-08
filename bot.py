@@ -212,16 +212,16 @@ def split_list(input_list, page_size):
     return pages, num_pages
 
 @client.command()
-async def list_commands(ctx: discord.Interaction, page: int = 0):
+async def list_commands(ctx: discord.Interaction, page: int = 1):
     global command_list
     pages, num_pages = split_list(command_list, 10)
     if not command_list:
         await ctx.send("No commands have been created yet.")
     else:
-        commands_str = "\n".join(pages[page])
         if page >= num_pages:
             await ctx.send(f"Invalid page number. There are only {num_pages + 1} pages.")
             return
-        await ctx.send(f"Here are the available commands:\n\n{commands_str}\n\nPage {page + 1}/{num_pages + 1}")
+        commands_str = "\n".join(pages[page - 1])
+        await ctx.send(f"Here are the available commands:\n\n{commands_str}\n\nPage {page + 1}/{num_pages + 1}. Use `!list_commands <page number>` to change the page.")
 
 client.run(token)
