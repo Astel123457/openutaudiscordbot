@@ -12,7 +12,7 @@ if not os.path.exists("config.json"):
 with open("config.json", "r") as f:
     config = json.load(f)
 
-
+command_list = [cmd for cmd in config.keys() if cmd not in ["make_command", "set_info", "set_image", "moderators"]].sort()
 
 client = commands.Bot(command_prefix='!', intents=intents, status=discord.Status.online, activity=discord.Activity(type=discord.ActivityType.custom, name="Use !help or ping me!"))
 client.remove_command("help")
@@ -200,13 +200,25 @@ async def rename_command(ctx: discord.Interaction, old_name: str, new_name: str)
 
     await ctx.send(f"The command `{old_name}` has been renamed to `{new_name}` successfully!")
 
+def split_list(input_list, page_size):
+    # Split the input list into chunks of size 'page_size'
+    pages = [input_list[i:i + page_size] for i in range(0, len(input_list), page_size)]
+    
+    # Count the number of pages
+    num_pages = len(pages)
+    
+    return pages, num_pages
+
 @client.command()
-async def list_commands(ctx: discord.Interaction):
-    command_list = [cmd for cmd in config.keys() if cmd not in ["make_command", "set_info", "set_image", "moderators"]]
+async def list_commands(ctx: discord.Interaction, page: int = 0):
+    pages, num_pages = split_list(command_list, 10)
     if not command_list:
         await ctx.send("No commands have been created yet.")
     else:
-        commands_str = "\n".join(command_list)
-        await ctx.send(f"Here are the available commands:\n\n{commands_str}")
+        commands_str = "\n".join(pages[page])
+        if page >= num_pages:
+            await ctx.send(f"Invalid page number. There are only {num_pages + 1} pages.")
+            return
+        await ctx.send(f"Here are the available commands:\n\n{commands_str}\n\nPage {page + 1}/{num_pages + 1}")
 
 client.run(token)
