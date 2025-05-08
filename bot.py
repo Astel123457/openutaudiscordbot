@@ -211,6 +211,7 @@ def split_list(input_list, page_size):
 
 @client.command()
 async def list_commands(ctx: discord.Interaction, page: int = 0):
+    global command_list
     pages, num_pages = split_list(command_list, 10)
     if not command_list:
         await ctx.send("No commands have been created yet.")
