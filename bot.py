@@ -2,8 +2,8 @@ import discord
 from discord.ext import commands
 import os
 import json
-import secrets
-token = secrets.discord_token
+import secrets as sec
+token = sec.discord_token
 
 intents = discord.Intents().default()
 intents.message_content = True
