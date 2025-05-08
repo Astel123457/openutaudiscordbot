@@ -2,7 +2,8 @@ import discord
 from discord.ext import commands
 import os
 import json
-token = "ODg5NzExMTgzMzEyMDgwOTQ3.GzMPBY.xJ2f4kSQ-eRLy5r_cRkqyyTfth8SIy38pW9cEE"
+import secrets
+token = secrets.discord_token
 
 intents = discord.Intents().default()
 intents.message_content = True
@@ -80,13 +81,15 @@ async def set_info(ctx: discord.Interaction, command: str, *, info: str):
     if ctx.author.id not in config["moderators"]:
         await ctx.send("You do not have permission to use this command.")
         return
+    
     conf = config.get(command, None)
+
     if conf is None:
         await ctx.send(f"The command `{command}` does not exist.")
         return
     
     conf["info"] = info
-    # Write the updated config to config.json
+    
     with open("config.json", "w") as f:
         json.dump(config, f)
 
@@ -128,18 +131,14 @@ async def remove_command(ctx: discord.Interaction, command: str = None):
     if command not in config:
         await ctx.send(f"The command `{command}` does not exist.")
         return
-    
-    # Remove the command from the config
 
     removed_command = config.pop(command)
 
-    # Delete associated image file if it exists
     if removed_command.get("has_image") and "image" in removed_command:
         image_path = removed_command["image"]
         if os.path.exists(image_path):
             os.remove(image_path)
 
-    # Write the updated config to config.json
     with open("config.json", "w") as f:
         json.dump(config, f)
 
@@ -196,17 +195,14 @@ async def rename_command(ctx: discord.Interaction, old_name: str, new_name: str)
 
     config[new_name] = config.pop(old_name)
 
-    # Write the updated config to config.json
     with open("config.json", "w") as f:
         json.dump(config, f)
 
     await ctx.send(f"The command `{old_name}` has been renamed to `{new_name}` successfully!")
 
 def split_list(input_list, page_size):
-    # Split the input list into chunks of size 'page_size'
     pages = [input_list[i:i + page_size] for i in range(0, len(input_list), page_size)]
     
-    # Count the number of pages
     num_pages = len(pages)
     
     return pages, num_pages
