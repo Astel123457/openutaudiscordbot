@@ -12,7 +12,9 @@ if not os.path.exists("config.json"):
 with open("config.json", "r") as f:
     config = json.load(f)
 
-command_list = [cmd for cmd in config.keys() if cmd not in ["make_command", "set_info", "set_image", "moderators"]].sort()
+command_list = [cmd for cmd in config.keys() if cmd not in ["make_command", "set_info", "set_image", "moderators"]]
+command_list.sort()
+print(command_list)
 
 client = commands.Bot(command_prefix='!', intents=intents, status=discord.Status.online, activity=discord.Activity(type=discord.ActivityType.custom, name="Use !help or ping me!"))
 client.remove_command("help")
