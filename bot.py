@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 import os
 import json
-import secrets as sec
+import secretsd as sec
 token = sec.discord_token
 
 intents = discord.Intents().default()

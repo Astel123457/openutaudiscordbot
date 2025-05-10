@@ -1,7 +1,7 @@
 .pebblegit
 pebblehost.yml
 MRBEAST.png
-secrets.py
+secretsd.py
 logs
 .env
 .template
