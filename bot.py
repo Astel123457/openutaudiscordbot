@@ -37,6 +37,7 @@ async def on_message(message):
             info = conf.get("info", None)  # Info can now be None
             has_image = conf.get("has_image", False)
             if has_image:
+                print("Image found")
                 image_path = conf.get("image", None)
                 if image_path and os.path.exists(image_path):
                     if info:
