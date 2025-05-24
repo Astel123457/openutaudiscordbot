@@ -113,8 +113,8 @@ async def make_command(ctx: discord.Interaction, command: str, *, info: str = No
     config[command] = {"info": info, "has_image": has_image}
 
     if has_image:
-        image_path = await ctx.message.attachments[0].save(ctx.message.attachments[0].filename)
-        config[command]["image"] = ctx.message.attachments[0].filename
+        image_path = await ctx.message.attachments[0].save(command + ".png")
+        config[command]["image"] = command + ".png"  
 
     with open("config.json", "w") as f:
         json.dump(config, f)
@@ -207,8 +207,22 @@ def split_list(input_list, page_size):
     
     return pages, num_pages
 
+def autocorrect_command(command_name):
+    global command_list
+    command_name = command_name.lower()
+    distances = []
+
+    for cmd in command_list:
+        distance = sum(1 for a, b in zip(command_name, cmd.lower()) if a != b) + abs(len(command_name) - len(cmd))
+        distances.append((cmd, distance))
+
+    distances.sort(key=lambda x: x[1])  # Sort by distance
+    top_matches = [cmd for cmd, dist in distances[:10]]  # Get top 10 or fewer matches
+
+    return top_matches
+
 @client.command()
-async def list_commands(ctx: discord.Interaction, page: int = 1):
+async def list_commands(ctx: discord.Interaction, page: int = 1, filter: str = None):
     global command_list
     page = page - 1
     pages, num_pages = split_list(command_list, 10)
@@ -218,6 +232,10 @@ async def list_commands(ctx: discord.Interaction, page: int = 1):
         if page >= num_pages or page < 0:
             await ctx.send(f"Invalid page number. There are only {num_pages} pages.")
             return
+        if filter is not None:
+            output = autocorrect_command(filter)
+            commands_str = "\n".join(output)
+            await ctx.send(f"Here are the closest commands to what you entered:\n\n{commands_str}")
         commands_str = "\n".join(pages[page])
         print(page)
         await ctx.send(f"Here are the available commands:\n\n{commands_str}\n\nPage {page + 1}/{num_pages}. Use `!list_commands <page number>` to change the page.")
