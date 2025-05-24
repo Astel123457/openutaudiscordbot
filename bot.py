@@ -32,6 +32,7 @@ async def on_message(message):
     if message.content.startswith('!') and not message.content.startswith('!moderators'):
         command_name = message.content[1:].split()[0]  # Extract command name
         conf = config.get(command_name, None)
+        print(conf)
         if conf is not None:  # Continue processing if the command exists
             info = conf.get("info", None)  # Info can now be None
             has_image = conf.get("has_image", False)
@@ -73,7 +74,7 @@ async def set_image(ctx: discord.Interaction, command: str):
 
     # Write the updated config to config.json
     with open("config.json", "w") as f:
-        json.dump(config, f)
+        json.dump(config, f, indent=4)
 
     await ctx.send(f"The image for the command `{command}` has been set successfully!")
 
@@ -92,7 +93,7 @@ async def set_info(ctx: discord.Interaction, command: str, *, info: str):
     conf["info"] = info
     
     with open("config.json", "w") as f:
-        json.dump(config, f)
+        json.dump(config, f, indent=4)
 
     await ctx.send(f"The info for the command `{command}` has been set successfully!")
 
@@ -118,7 +119,7 @@ async def make_command(ctx: discord.Interaction, command: str, *, info: str = No
         config[command]["image"] = command + ".png"  
 
     with open("config.json", "w") as f:
-        json.dump(config, f)
+        json.dump(config, f, indent=4)
     await ctx.send(f"The command `{command}` has been created successfully!")
     
 @client.command()
@@ -141,7 +142,7 @@ async def remove_command(ctx: discord.Interaction, command: str = None):
             os.remove(image_path)
 
     with open("config.json", "w") as f:
-        json.dump(config, f)
+        json.dump(config, f, indent=4)
 
     await ctx.send(f"The command `{command}` has been removed successfully!")
 
@@ -157,7 +158,7 @@ async def add_bot_moderator(ctx: discord.Interaction, user: discord.User):
 
     config["moderators"].append(user.id)
     with open("config.json", "w") as f:
-        json.dump(config, f)
+        json.dump(config, f, indent=4)
 
     await ctx.send(f"{user.name} has been added as a moderator.")
 
@@ -197,7 +198,7 @@ async def rename_command(ctx: discord.Interaction, old_name: str, new_name: str)
     config[new_name] = config.pop(old_name)
 
     with open("config.json", "w") as f:
-        json.dump(config, f)
+        json.dump(config, f, indent=4)
 
     await ctx.send(f"The command `{old_name}` has been renamed to `{new_name}` successfully!")
 
