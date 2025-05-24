@@ -3,6 +3,7 @@ from discord.ext import commands
 import os
 import json
 import secretsd as sec
+from difflib import get_close_matches
 token = sec.discord_token
 
 intents = discord.Intents().default()
@@ -210,15 +211,7 @@ def split_list(input_list, page_size):
 def autocorrect_command(command_name):
     global command_list
     command_name = command_name.lower()
-    distances = []
-
-    for cmd in command_list:
-        distance = sum(1 for a, b in zip(command_name, cmd.lower()) if a != b) + abs(len(command_name) - len(cmd))
-        distances.append((cmd, distance))
-
-    distances.sort(key=lambda x: x[1])  # Sort by distance
-    top_matches = [cmd for cmd, dist in distances[:10]]  # Get top 10 or fewer matches
-
+    top_matches = get_close_matches(command_name, command_list, n=10, cutoff=0.1) 
     return top_matches
 
 @client.command()
@@ -236,6 +229,7 @@ async def list_commands(ctx: discord.Interaction, page: int = 1, filter: str = N
             output = autocorrect_command(filter)
             commands_str = "\n".join(output)
             await ctx.send(f"Here are the closest commands to what you entered:\n\n{commands_str}")
+            return
         commands_str = "\n".join(pages[page])
         print(page)
         await ctx.send(f"Here are the available commands:\n\n{commands_str}\n\nPage {page + 1}/{num_pages}. Use `!list_commands <page number>` to change the page.")
