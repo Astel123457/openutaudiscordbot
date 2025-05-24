@@ -40,10 +40,14 @@ async def on_message(message):
                 print("Image found")
                 image_path = conf.get("image", None)
                 if image_path and os.path.exists(image_path):
-                    if info:
-                        await message.channel.send(info, file=discord.File(image_path))
-                    else:
-                        await message.channel.send(file=discord.File(image_path))
+                    try:
+                        if info:
+                            await message.channel.send(info, file=discord.File(image_path))
+                        else:
+                            await message.channel.send(file=discord.File(image_path))
+                    except Exception as e:
+                        print(f"Error sending image: {e}")
+                        
                 else:
                     if info:
                         await message.channel.send(info)
@@ -226,23 +230,32 @@ def autocorrect_command(command_name):
     return combined_matches
 
 @client.command()
-async def list_commands(ctx: discord.Interaction, page: int = 1, filter: str = None):
+async def list_commands(ctx: discord.Interaction, page_or_filter: str = None):
     global command_list
-    page = page - 1
     pages, num_pages = split_list(command_list, 10)
+
     if not command_list:
         await ctx.send("No commands have been created yet.")
-    else:
+        return
+
+    if page_or_filter is None:
+        page = 0
+    elif page_or_filter.isdigit():
+        page = int(page_or_filter) - 1
         if page >= num_pages or page < 0:
             await ctx.send(f"Invalid page number. There are only {num_pages} pages.")
             return
-        if filter is not None:
-            output = autocorrect_command(filter)
+        commands_str = "\n".join(pages[page])
+        await ctx.send(f"Here are the available commands:\n\n{commands_str}\n\nPage {page + 1}/{num_pages}. Use `!list_commands <page number>` to change the page,\nor `!list_commands <command>` to search for a command.")
+        return
+    else:
+        filter = page_or_filter
+        output = autocorrect_command(filter)
+        if not output:
+            await ctx.send(f"No commands found matching `{filter}`.")
+        else:
             commands_str = "\n".join(output)
             await ctx.send(f"Here are the closest commands to what you entered:\n\n{commands_str}")
-            return
-        commands_str = "\n".join(pages[page])
-        print(page)
-        await ctx.send(f"Here are the available commands:\n\n{commands_str}\n\nPage {page + 1}/{num_pages}. Use `!list_commands <page number>` to change the page.")
+        return
 
 client.run(token)
