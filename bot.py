@@ -211,8 +211,17 @@ def split_list(input_list, page_size):
 def autocorrect_command(command_name):
     global command_list
     command_name = command_name.lower()
-    top_matches = get_close_matches(command_name, command_list, n=10, cutoff=0.1) 
-    return top_matches
+    
+    # First, prioritize commands that contain the input as a substring
+    substring_matches = [cmd for cmd in command_list if command_name in cmd.lower()]
+    
+    # Then, find other close matches using get_close_matches
+    close_matches = get_close_matches(command_name, command_list, n=10, cutoff=0.1)
+    
+    # Combine the results, ensuring no duplicates and preserving order
+    combined_matches = list(dict.fromkeys(substring_matches + close_matches))
+    
+    return combined_matches
 
 @client.command()
 async def list_commands(ctx: discord.Interaction, page: int = 1, filter: str = None):
