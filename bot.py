@@ -239,7 +239,10 @@ async def list_commands(ctx: discord.Interaction, page_or_filter: str = None):
         return
 
     if page_or_filter is None:
-        page = 1
+        page = 0  # Default to the first page
+        commands_str = "\n".join(pages[page])
+        await ctx.send(f"Here are the available commands:\n\n{commands_str}\n\nPage {page + 1}/{num_pages}. Use `!list_commands <page number>` to change the page,\nor `!list_commands <command>` to search for a command.")
+        return
     elif page_or_filter.isdigit():
         page = int(page_or_filter) - 1
         if page >= num_pages or page < 0:
