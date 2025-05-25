@@ -239,7 +239,7 @@ async def list_commands(ctx: discord.Interaction, page_or_filter: str = None):
         return
 
     if page_or_filter is None:
-        page = 0
+        page = 1
     elif page_or_filter.isdigit():
         page = int(page_or_filter) - 1
         if page >= num_pages or page < 0:
