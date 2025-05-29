@@ -231,12 +231,12 @@ def autocorrect_command(command_name):
 
 @client.command()
 async def get_config(ctx: discord.Interaction):
+    global config
     if ctx.author.id not in config["moderators"]:
         await ctx.send("You do not have permission to use this command.")
         return
 
     # If the user uploads a file, load and save it as config.json
-    global config
     if hasattr(ctx.message, "attachments") and ctx.message.attachments:
         attachment = ctx.message.attachments[0]
         if attachment.filename.endswith(".json"):
