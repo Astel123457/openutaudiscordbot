@@ -235,10 +235,27 @@ async def get_config(ctx: discord.Interaction):
         await ctx.send("You do not have permission to use this command.")
         return
 
-    if os.path.exists("config.json"):
-        await ctx.send(file=discord.File("config.json"))
+    # If the user uploads a file, load and save it as config.json
+    global config
+    if hasattr(ctx.message, "attachments") and ctx.message.attachments:
+        attachment = ctx.message.attachments[0]
+        if attachment.filename.endswith(".json"):
+            file_bytes = await attachment.read()
+            try:
+                config = json.loads(file_bytes.decode("utf-8"))
+                with open("config.json", "w") as f:
+                    json.dump(config, f, indent=4)
+                await ctx.send("The config file has been updated successfully.")
+            except Exception as e:
+                await ctx.send(f"Failed to load config: {e}")
+        else:
+            await ctx.send("Please upload a valid JSON file.")
     else:
-        await ctx.send("The config file does not exist.")
+        # Otherwise, send the current config.json file
+        if os.path.exists("config.json"):
+            await ctx.send(file=discord.File("config.json"))
+        else:
+            await ctx.send("The config file does not exist.")
 
 @client.command()
 async def list_commands(ctx: discord.Interaction, page_or_filter: str = None):
