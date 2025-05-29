@@ -74,8 +74,8 @@ async def set_image(ctx: discord.Interaction, command: str):
     if len(ctx.message.attachments) == 0:
         await ctx.send("You must provide an image. (Links are not supported at this time)")
         return
-    image_path = await ctx.message.attachments[0].save(ctx.message.attachments[0].filename)  # this is the image that is being sent
-    conf["image"] = ctx.message.attachments[0].filename
+    image_path = await ctx.message.attachments[0].save(command + ".png")  # this is the image that is being sent
+    conf["image"] = command + ".png"  
 
     # Write the updated config to config.json
     with open("config.json", "w") as f:
