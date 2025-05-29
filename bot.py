@@ -230,6 +230,17 @@ def autocorrect_command(command_name):
     return combined_matches
 
 @client.command()
+async def get_config(ctx: discord.Interaction):
+    if ctx.author.id not in config["moderators"]:
+        await ctx.send("You do not have permission to use this command.")
+        return
+
+    if os.path.exists("config.json"):
+        await ctx.send(file=discord.File("config.json"))
+    else:
+        await ctx.send("The config file does not exist.")
+
+@client.command()
 async def list_commands(ctx: discord.Interaction, page_or_filter: str = None):
     global command_list
     pages, num_pages = split_list(command_list, 10)
