@@ -1,58 +1,95 @@
 import discord
 from discord.ext import commands
+import asyncio
+from difflib import get_close_matches
 import os
 import json
 import secretsd as sec
-from difflib import get_close_matches
+
+# --- Configuration and Initialization ---
 token = sec.discord_token
 
-intents = discord.Intents().default()
+# Ensure intents are correctly set for message content and reactions
+intents = discord.Intents.default()
 intents.message_content = True
+intents.reactions = True # Crucial for reaction-based pagination
+
+# Load or create config.json
 if not os.path.exists("config.json"):
     with open("config.json", "w") as f:
-        json.dump({"moderators":[493626802644713473]}, f)
+        json.dump({"moderators":[493626802644713473]}, f, indent=4) # Added indent for readability
 with open("config.json", "r") as f:
     config = json.load(f)
 
-command_list = [cmd for cmd in config.keys() if cmd not in ["make_command", "set_info", "set_image", "moderators"]]
-command_list.sort()
-print(command_list)
+command_list = []
 
-client = commands.Bot(command_prefix='!', intents=intents, status=discord.Status.online, activity=discord.Activity(type=discord.ActivityType.custom, name="Use !help or ping me!"))
+def update_command_list():
+    """Updates the global command_list from the current config."""
+    global command_list
+    global config
+
+    with open("config.json", "r") as f:
+        config.clear()
+        config.update(json.load(f))
+
+    command_list.clear()
+    internal_commands = ["make_command", "set_info", "set_image", "moderators",
+                         "remove_command", "add_bot_moderator", "rename_command",
+                         "list_commands", "import_config"]
+    command_list.extend([cmd for cmd in config.keys() if cmd not in internal_commands])
+    command_list.sort()
+    print("Command list updated:", command_list) # For debugging purposes
+
+update_command_list()
+
+client = commands.Bot(command_prefix='!', intents=intents, status=discord.Status.online,
+                      activity=discord.Activity(type=discord.ActivityType.custom, name="Use !help or ping me!"))
 client.remove_command("help")
 
+# --- Bot Events ---
 @client.event
 async def on_ready():
+    """Called when the bot is ready and connected to Discord."""
+    print(f"Logged in as {client.user.name}")
+    print(f"Bot ID: {client.user.id}")
     print("Client has started")
 
 @client.event
 async def on_message(message):
+    """Processes messages for custom commands and mentions."""
     if message.author == client.user:
         return
-    if message.content.startswith('!') and not message.content.startswith('!moderators'):
-        command_name = message.content[1:].split()[0]  # Extract command name
+
+    if message.content.startswith(client.command_prefix) and not message.content.startswith(f'{client.command_prefix}moderators'):
+        command_name = message.content[len(client.command_prefix):].split()[0]
         conf = config.get(command_name, None)
-        print(conf)
-        if conf is not None:  # Continue processing if the command exists
-            info = conf.get("info", None)  # Info can now be None
+        print(f"Attempting to process dynamic command: {command_name}, config: {conf}")
+
+        if conf is not None: # If the command exists in config
+            info = conf.get("info", None)
             has_image = conf.get("has_image", False)
+
             if has_image:
-                print("Image found")
                 image_path = conf.get("image", None)
                 if image_path and os.path.exists(image_path):
                     try:
+                        # Send info and image if both exist, otherwise just image
                         if info:
                             await message.channel.send(info, file=discord.File(image_path))
                         else:
                             await message.channel.send(file=discord.File(image_path))
+                        print(f"Sent image for command {command_name} from {image_path}")
                     except Exception as e:
-                        print(f"Error sending image: {e}")
-                        
+                        print(f"Error sending image for command {command_name}: {e}")
                 else:
+                    print(f"Image path not found or invalid for command {command_name}: {image_path}")
                     if info:
                         await message.channel.send(info)
             elif info:
                 await message.channel.send(info)
+            return 
+
+    # Handle bot mentions
     if client.user.mentioned_in(message):
         embed = discord.Embed(title="Hello!", description="This Bot is used to help the users of the Openutau discord server.\nIf you would like some help, check out one of the links below.", color=0x00ff00)
         embed.add_field(name="Getting Started", value="https://github.com/stakira/OpenUtau/wiki/Getting-Started", inline=False)
@@ -61,53 +98,96 @@ async def on_message(message):
         await message.channel.send(embed=embed)
     await client.process_commands(message)
 
+# --- Utility Functions ---
+def split_list(input_list, page_size):
+    """Divides a list into pages of a given size."""
+    pages = [input_list[i:i + page_size] for i in range(0, len(input_list), page_size)]
+    num_pages = len(pages)
+    return pages, num_pages
+
+def autocorrect_command(command_name):
+    """
+    Suggests commands based on substring matches and close matches.
+    Uses the global command_list.
+    """
+    global command_list
+    command_name = command_name.lower()
+
+    substring_matches = [cmd for cmd in command_list if command_name in cmd.lower()]
+    close_matches = get_close_matches(command_name, command_list, n=10, cutoff=0.1)
+    combined_matches = list(dict.fromkeys(substring_matches + close_matches))
+    return combined_matches
+
+# --- Bot Commands ---
 @client.command()
-async def set_image(ctx: discord.Interaction, command: str):
+async def set_image(ctx: commands.Context, command: str): 
+    """
+    Sets an image for a custom command.
+    Requires moderator permissions.
+    Usage: !set_image <command_name> (attach image)
+    """
     if ctx.author.id not in config["moderators"]:
         await ctx.send("You do not have permission to use this command.")
         return
-    conf = config.get(command, None)  # example is the name of the command that you are making
+
+    conf = config.get(command, None)
     if conf is None:
+        # If command doesn't exist, create a basic entry for it
         config[command] = {}
         conf = config.get(command, None)
+
     conf["has_image"] = True
-    if len(ctx.message.attachments) == 0:
+    if not ctx.message.attachments:
         await ctx.send("You must provide an image. (Links are not supported at this time)")
         return
-    image_path = await ctx.message.attachments[0].save(ctx.message.attachments[0].filename)  # this is the image that is being sent
-    conf["image"] = ctx.message.attachments[0].filename
 
-    # Write the updated config to config.json
+    image_filename = ctx.message.attachments[0].filename
+    image_path = os.path.join("images", image_filename)
+    os.makedirs(os.path.dirname(image_path), exist_ok=True)
+    await ctx.message.attachments[0].save(image_path)
+    conf["image"] = image_path
+
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
 
+    update_command_list() 
     await ctx.send(f"The image for the command `{command}` has been set successfully!")
 
 @client.command()
-async def set_info(ctx: discord.Interaction, command: str, *, info: str):
+async def set_info(ctx: commands.Context, command: str, *, info: str):
+    """
+    Sets the informational text for a custom command.
+    Requires moderator permissions.
+    Usage: !set_info <command_name> <info_text>
+    """
     if ctx.author.id not in config["moderators"]:
         await ctx.send("You do not have permission to use this command.")
         return
-    
-    conf = config.get(command, None)
 
+    conf = config.get(command, None)
     if conf is None:
-        await ctx.send(f"The command `{command}` does not exist.")
+        await ctx.send(f"The command `{command}` does not exist. Use `!make_command` to create it first.")
         return
-    
+
     conf["info"] = info
-    
+
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
 
+    update_command_list()
     await ctx.send(f"The info for the command `{command}` has been set successfully!")
 
 @client.command()
-async def make_command(ctx: discord.Interaction, command: str, *, info: str = None):
+async def make_command(ctx: commands.Context, command: str, *, info: str = None):
+    """
+    Creates a new custom command.
+    Requires moderator permissions.
+    Usage: !make_command <command_name> [info_text] (attach image)
+    """
     if ctx.author.id not in config["moderators"]:
         await ctx.send("You do not have permission to use this command.")
         return
-    
+
     if command in config:
         await ctx.send(f"The command `{command}` already exists.")
         return
@@ -120,15 +200,25 @@ async def make_command(ctx: discord.Interaction, command: str, *, info: str = No
     config[command] = {"info": info, "has_image": has_image}
 
     if has_image:
-        image_path = await ctx.message.attachments[0].save(command + ".png")
-        config[command]["image"] = command + ".png"  
+        image_filename = command + ".png"
+        image_path = os.path.join("images", image_filename)
+        os.makedirs(os.path.dirname(image_path), exist_ok=True)
+        await ctx.message.attachments[0].save(image_path)
+        config[command]["image"] = image_path
 
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
+
+    update_command_list()
     await ctx.send(f"The command `{command}` has been created successfully!")
-    
+
 @client.command()
-async def remove_command(ctx: discord.Interaction, command: str = None):
+async def remove_command(ctx: commands.Context, command: str = None): 
+    """
+    Removes an existing custom command.
+    Requires moderator permissions.
+    Usage: !remove_command <command_name>
+    """
     if ctx.author.id not in config["moderators"]:
         await ctx.send("You do not have permission to use this command.")
         return
@@ -139,20 +229,31 @@ async def remove_command(ctx: discord.Interaction, command: str = None):
         await ctx.send(f"The command `{command}` does not exist.")
         return
 
-    removed_command = config.pop(command)
+    removed_command_data = config.pop(command)
 
-    if removed_command.get("has_image") and "image" in removed_command:
-        image_path = removed_command["image"]
+    # If the command had an associated image, delete the file
+    if removed_command_data.get("has_image") and "image" in removed_command_data:
+        image_path = removed_command_data["image"]
         if os.path.exists(image_path):
-            os.remove(image_path)
+            try:
+                os.remove(image_path)
+                print(f"Removed image file: {image_path}")
+            except OSError as e:
+                print(f"Error removing image file {image_path}: {e}")
 
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
 
+    update_command_list()
     await ctx.send(f"The command `{command}` has been removed successfully!")
 
 @client.command()
-async def add_bot_moderator(ctx: discord.Interaction, user: discord.User):
+async def add_bot_moderator(ctx: commands.Context, user: discord.User): 
+    """
+    Adds a user as a bot moderator.
+    Requires existing moderator permissions.
+    Usage: !add_bot_moderator <@user>
+    """
     if ctx.author.id not in config["moderators"]:
         await ctx.send("You do not have permission to use this command.")
         return
@@ -168,26 +269,42 @@ async def add_bot_moderator(ctx: discord.Interaction, user: discord.User):
     await ctx.send(f"{user.name} has been added as a moderator.")
 
 @client.command()
-async def moderators(ctx: discord.Interaction):
+async def moderators(ctx: commands.Context): 
+    """
+    Lists all current bot moderators.
+    Requires moderator permissions.
+    Usage: !moderators
+    """
     if ctx.author.id not in config["moderators"]:
         await ctx.send("You do not have permission to use this command.")
         return
 
-    moderator_list = [user_id for user_id in config["moderators"]]
-    if not moderator_list:
+    moderator_ids = config["moderators"]
+    if not moderator_ids:
         await ctx.send("No moderators have been added yet.")
     else:
         mods = []
-        for user_id in moderator_list:
+        for user_id in moderator_ids:
             try:
-                mods.append(f"{await client.fetch_user(user_id)}: (ID: {user_id})")
+                user = await client.fetch_user(user_id)
+                mods.append(f"{user.name}#{user.discriminator} (ID: {user_id})")
             except discord.NotFound:
-                mods.append(f"Unknown User: (ID: {user_id})")
+                mods.append(f"Unknown User (ID: {user_id})")
         moderators_str = "\n".join(mods)
-        await ctx.send(f"Here are the current moderators:\n\n{moderators_str}")
+        embed = discord.Embed(
+            title="Current Bot Moderators",
+            description=moderators_str,
+            color=discord.Color.blue()
+        )
+        await ctx.send(embed=embed)
 
 @client.command()
-async def rename_command(ctx: discord.Interaction, old_name: str, new_name: str):
+async def rename_command(ctx: commands.Context, old_name: str, new_name: str): 
+    """
+    Renames an existing custom command.
+    Requires moderator permissions.
+    Usage: !rename_command <old_name> <new_name>
+    """
     if ctx.author.id not in config["moderators"]:
         await ctx.send("You do not have permission to use this command.")
         return
@@ -202,63 +319,238 @@ async def rename_command(ctx: discord.Interaction, old_name: str, new_name: str)
 
     config[new_name] = config.pop(old_name)
 
+    if config[new_name].get("has_image") and "image" in config[new_name]:
+        old_image_path = config[new_name]["image"]
+        old_image_filename = os.path.basename(old_image_path)
+        old_image_ext = os.path.splitext(old_image_filename)[1]
+        new_image_filename = new_name + old_image_ext
+        new_image_path = os.path.join("images", new_image_filename)
+
+        if os.path.exists(old_image_path):
+            try:
+                os.rename(old_image_path, new_image_path)
+                config[new_name]["image"] = new_image_path
+                print(f"Renamed image from {old_image_path} to {new_image_path}")
+            except OSError as e:
+                print(f"Error renaming image file {old_image_path} to {new_image_path}: {e}")
+        else:
+            print(f"Old image path not found for renaming: {old_image_path}")
+
+
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
 
+    update_command_list()
     await ctx.send(f"The command `{old_name}` has been renamed to `{new_name}` successfully!")
 
-def split_list(input_list, page_size):
-    pages = [input_list[i:i + page_size] for i in range(0, len(input_list), page_size)]
-    
-    num_pages = len(pages)
-    
-    return pages, num_pages
+@client.command(name='list_commands', aliases=['commands', 'helpme'])
+async def list_commands(ctx: commands.Context, *, page_or_filter: str = None):
+    """
+    Lists all available commands, paginated, with interactive navigation.
+    You can also search for a specific command.
+    Usage: !list_commands [page_number|command_name]
+    """
+    update_command_list()
 
-def autocorrect_command(command_name):
-    global command_list
-    command_name = command_name.lower()
-    
-    # First, prioritize commands that contain the input as a substring
-    substring_matches = [cmd for cmd in command_list if command_name in cmd.lower()]
-    
-    # Then, find other close matches using get_close_matches
-    close_matches = get_close_matches(command_name, command_list, n=10, cutoff=0.1)
-    
-    # Combine the results, ensuring no duplicates and preserving order
-    combined_matches = list(dict.fromkeys(substring_matches + close_matches))
-    
-    return combined_matches
+    COMMANDS_PER_PAGE = 10
+    command_pages, num_pages = split_list(command_list, COMMANDS_PER_PAGE)
+    current_page = 0
 
-@client.command()
-async def list_commands(ctx: discord.Interaction, page_or_filter: str = None):
-    global command_list
-    pages, num_pages = split_list(command_list, 10)
-
-    if not command_list:
-        await ctx.send("No commands have been created yet.")
+    if not command_list: # Case 1: No commands available
+        embed = discord.Embed(
+            title="No Commands Available",
+            description="It seems there are no custom commands to display yet. Moderators can create them using `!make_command`.",
+            color=discord.Color.orange()
+        )
+        embed.set_footer(text="This message will disappear in 60 seconds.")
+        msg = await ctx.send(embed=embed)
+        await asyncio.sleep(60)
+        try:
+            await msg.delete()
+        except discord.NotFound:
+            pass
         return
 
-    if page_or_filter is None:
-        page = 0  # Default to the first page
-        commands_str = "\n".join(pages[page])
-        await ctx.send(f"Here are the available commands:\n\n{commands_str}\n\nPage {page + 1}/{num_pages}. Use `!list_commands <page number>` to change the page,\nor `!list_commands <command>` to search for a command.")
-        return
-    elif page_or_filter.isdigit():
-        page = int(page_or_filter) - 1
-        if page >= num_pages or page < 0:
-            await ctx.send(f"Invalid page number. There are only {num_pages} pages.")
-            return
-        commands_str = "\n".join(pages[page])
-        await ctx.send(f"Here are the available commands:\n\n{commands_str}\n\nPage {page + 1}/{num_pages}. Use `!list_commands <page number>` to change the page,\nor `!list_commands <command>` to search for a command.")
-        return
-    else:
-        filter = page_or_filter
-        output = autocorrect_command(filter)
-        if not output:
-            await ctx.send(f"No commands found matching `{filter}`.")
+    # Handle filtering by command name (Case 2: Search query)
+    if page_or_filter and not page_or_filter.isdigit():
+        search_query = page_or_filter
+        found_commands = autocorrect_command(search_query)
+        if found_commands:
+            embed = discord.Embed(
+                title=f"Commands matching '{search_query}'",
+                description="\n".join(found_commands),
+                color=discord.Color.blue()
+            )
+            embed.set_footer(text="This search result will disappear in 60 seconds.")
+            msg = await ctx.send(embed=embed)
         else:
-            commands_str = "\n".join(output)
-            await ctx.send(f"Here are the closest commands to what you entered:\n\n{commands_str}")
+            embed = discord.Embed(
+                title="No Commands Found",
+                description=f"No commands matching '{search_query}' were found. Try `!list_commands` to see all commands.",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="This message will disappear in 60 seconds.")
+            msg = await ctx.send(embed=embed)
+
+        await asyncio.sleep(60)
+        try:
+            await msg.delete()
+        except discord.NotFound:
+            pass
         return
+
+    # Handle direct page number input (Case 3: Invalid page number)
+    if page_or_filter and page_or_filter.isdigit():
+        try:
+            requested_page = int(page_or_filter) - 1
+            if not (0 <= requested_page < num_pages):
+                embed = discord.Embed(
+                    title="Invalid Page Number",
+                    description=f"Page number must be between 1 and {num_pages}.",
+                    color=discord.Color.red()
+                )
+                embed.set_footer(text="This message will disappear in 60 seconds.")
+                msg = await ctx.send(embed=embed)
+                await asyncio.sleep(60)
+                try:
+                    await msg.delete()
+                except discord.NotFound:
+                    pass
+                return 
+            current_page = requested_page 
+        except ValueError:
+            pass
+
+    # --- Embed Creation and Initial Send (This part is for the interactive pagination) ---
+    def create_commands_embed(page_index):
+        if not command_pages or not (0 <= page_index < len(command_pages)):
+            return discord.Embed(
+                title="Error Displaying Commands",
+                description="Could not find commands for this page.",
+                color=discord.Color.red()
+            )
+
+        commands_on_page = command_pages[page_index]
+        commands_str = "\n".join(commands_on_page)
+
+        embed = discord.Embed(
+            title="Available Commands",
+            description=f"Here are the commands you can use:\n\n{commands_str}",
+            color=discord.Color.green()
+        )
+        embed.set_footer(text=f"Page {page_index + 1}/{num_pages} | React to navigate. This message will expire in 60 seconds.")
+        return embed
+
+    message = await ctx.send(embed=create_commands_embed(current_page))
+
+    # --- Add Reactions for Navigation ---
+    if num_pages > 1:
+        await message.add_reaction("◀️")
+        await message.add_reaction("▶️")
+        await message.add_reaction("❌")
+
+    # --- Reaction Listener Loop ---
+    def check(reaction, user):
+        return (user == ctx.author and
+                str(reaction.emoji) in ["◀️", "▶️", "❌"] and
+                reaction.message.id == message.id)
+
+    while True:
+        try:
+            reaction, user = await client.wait_for("reaction_add", timeout=60.0, check=check)
+
+            try:
+                await message.remove_reaction(reaction, user)
+            except discord.HTTPException:
+                print(f"Could not remove reaction: {reaction.emoji} by {user.name}. Check bot permissions.")
+
+            if str(reaction.emoji) == "▶️":
+                current_page = (current_page + 1) % num_pages
+            elif str(reaction.emoji) == "◀️":
+                current_page = (current_page - 1 + num_pages) % num_pages
+            elif str(reaction.emoji) == "❌":
+                await message.delete()
+                print("Interaction closed by user.")
+                return
+
+            await message.edit(embed=create_commands_embed(current_page))
+
+        except asyncio.TimeoutError:
+            print("Command pagination timed out.")
+            try:
+                await message.clear_reactions()
+                expired_embed = create_commands_embed(current_page)
+                expired_embed.set_footer(text="This command navigation has expired.")
+                expired_embed.color = discord.Color.greyple()
+                await message.edit(embed=expired_embed)
+            except discord.HTTPException:
+                print("Could not clear reactions. Check bot permissions.")
+            break
+        except Exception as e:
+            print(f"An unexpected error occurred during pagination: {e}")
+            break
+    
+# --- Import Config Command ---
+@client.command(name='import_config')
+async def import_config(ctx: commands.Context):
+    """
+    Imports a new config.json file, overwriting the current one.
+    Requires moderator permissions.
+    Usage: !import_config (attach config.json file)
+    """
+    error_message_lifetime = 30
+
+    # Helper to send a temporary error message
+    async def send_temp_error(message_content: str):
+        embed = discord.Embed(
+            description=message_content,
+            color=discord.Color.red()
+        )
+        embed.set_footer(text=f"This message will remove in {error_message_lifetime} seconds.")
+        msg = await ctx.send(embed=embed)
+        await asyncio.sleep(error_message_lifetime)
+        try:
+            await msg.delete()
+        except discord.NotFound:
+            pass
+
+    if ctx.author.id not in config["moderators"]:
+        await send_temp_error("You do not have permission to use this command.")
+        return
+
+    if not ctx.message.attachments:
+        await send_temp_error("Please attach a JSON file to import.")
+        return
+
+    attachment = ctx.message.attachments[0]
+
+    if not attachment.filename.lower().endswith(".json"):
+        await send_temp_error("The attached file does not appear to be a JSON file. Please attach a file ending with `.json`.")
+        return
+
+    try:
+        file_content_bytes = await attachment.read()
+        file_content_str = file_content_bytes.decode('utf-8')
+
+        new_config_data = json.loads(file_content_str)
+
+        if not isinstance(new_config_data, dict) or "moderators" not in new_config_data:
+            await send_temp_error("The attached JSON file seems to be malformed or missing the 'moderators' key. Please ensure it's a valid config structure.")
+            return
+        
+        # Overwrite the config.json file on disk
+        with open("config.json", "w") as f:
+            json.dump(new_config_data, f, indent=4)
+        
+        update_command_list()
+
+        # Success message will NOT go away
+        await ctx.send("`config.json` imported successfully! Bot commands and settings have been updated.")
+
+    except json.JSONDecodeError as e:
+        await send_temp_error(f"The attached file could not be parsed as valid JSON. Please check its format. Error: `{e}`")
+    except Exception as e:
+        print(f"An unexpected error occurred during config import: {e}")
+        await send_temp_error(f"An unexpected error occurred while importing the config: `{e}`")
 
 client.run(token)
