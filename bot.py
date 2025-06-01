@@ -5,14 +5,21 @@ from difflib import get_close_matches
 import os
 import json
 import secretsd as sec
+import google.generativeai as genai
+from io import BytesIO
+from PIL import Image
 
 # --- Configuration and Initialization ---
 token = sec.discord_token
+gemini_api_key = sec.gemini_api_key
 
 # Ensure intents are correctly set for message content and reactions
 intents = discord.Intents.default()
 intents.message_content = True
 intents.reactions = True # Crucial for reaction-based pagination
+genai.configure(api_key=gemini_api_key)
+gemini_model = genai.GenerativeModel('gemini-2.0-flash')
+
 
 # Load or create config.json
 if not os.path.exists("config.json"):
@@ -54,10 +61,121 @@ async def on_ready():
     print(f"Bot ID: {client.user.id}")
     print("Client has started")
 
+async def get_message_history(channel, limit=10):
+    messages = []
+    async for msg in channel.history(limit=limit):
+        if msg.type == discord.MessageType.default and not msg.author.bot and msg.author != client.user:
+            formatted_message = f"{msg.author.display_name}: {msg.content}"
+            messages.append(formatted_message)
+    return "\n".join(reversed(messages))
+
 @client.event
 async def on_message(message):
-    """Processes messages for custom commands and mentions."""
     if message.author == client.user:
+        return
+    
+    starts_with_prefix = message.content.startswith('?')
+    if starts_with_prefix:
+        user_prompt = message.content[1:].strip()
+
+        # --- DIAGNOSTIC PRINT (TEMPORARY - REMOVE IN PRODUCTION!) ---
+        print(f"DEBUG: Chatbot prompt received: '{user_prompt}' (Length: {len(user_prompt)} chars)")
+        print(f"DEBUG: Loaded Gemini API Key starts with: {gemini_api_key[:5]}...")
+
+        error_message_lifetime = 15
+        typing_task = message.channel.typing()
+        await typing_task.__aenter__()
+
+        try:
+            if not user_prompt and not message.attachments:  # Check for both text and attachments
+                temp_msg = await message.channel.send("Please provide a question/prompt or attach an image/file after the `?`.")
+                await asyncio.sleep(10)
+                try: await temp_msg.delete()
+                except discord.NotFound: pass
+                return
+
+            # --- Handle Attachments ---
+            attachment_data = []
+            for attachment in message.attachments:
+                if attachment.content_type.startswith('image/'):
+                    # Download the image
+                    image_bytes = await attachment.read()
+                    image = Image.open(BytesIO(image_bytes))
+                    attachment_data.append(image)
+                elif attachment.content_type.startswith('text/'):
+                    text_content = await attachment.read()
+                    try:
+                        text_content = text_content.decode('utf-8')
+                        user_prompt += f"\n\nAttached Text File Content:\n{text_content}"
+                    except UnicodeDecodeError:
+                        print(f"Warning: Could not decode text file {attachment.filename}. Skipping its content.")
+                else:
+                    print(f"Unsupported attachment type: {attachment.content_type}. Skipping {attachment.filename}.")
+
+            # Setting a hard limit on the *user's input* length before sending to AI
+            MAX_USER_PROMPT_LENGTH = 400
+            if len(user_prompt) > MAX_USER_PROMPT_LENGTH:
+                error_msg_content = (
+                    f"Your message is too long ({len(user_prompt)} characters). "
+                    f"Please keep your prompts to {MAX_USER_PROMPT_LENGTH} characters or fewer."
+                )
+                error_msg = await message.channel.send(error_msg_content)
+                await asyncio.sleep(error_message_lifetime)
+                try: await error_msg.delete()
+                except discord.NotFound: pass
+                return
+
+            try:
+                # --- Get message history ---
+                message_history = await get_message_history(message.channel)
+                # --- Modify the prompt to instruct the AI to be concise and consider history ---
+                ai_prompt_for_model = f"Previous conversation:\n{message_history}\n\nUser's current input: {user_prompt}\n\nPlease keep your answer concise and under 1950 characters."
+
+                if attachment_data:
+                    # If there are images, create the parts list
+                    parts = [ai_prompt_for_model] + attachment_data
+                    response = await asyncio.to_thread(gemini_model.generate_content, parts)
+                else:
+                    response = await asyncio.to_thread(gemini_model.generate_content, ai_prompt_for_model)
+
+                # Check for prompt feedback that might indicate safety issues
+                if response.prompt_feedback and response.prompt_feedback.block_reason:
+                    block_reason = response.prompt_feedback.block_reason.name
+                    print(f"Gemini blocked prompt due to: {block_reason}")
+                    await message.channel.send(
+                        f"I'm sorry, I couldn't generate a response for that. It was blocked due to `{block_reason}` safety reasons."
+                    )
+                # Check if candidates exist and have content
+                elif response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
+                    full_chatbot_response_parts = []
+                    for part in response.candidates[0].content.parts:
+                        if hasattr(part, 'text'):
+                            full_chatbot_response_parts.append(part.text)
+
+                    chatbot_response = "".join(full_chatbot_response_parts)
+
+                    # --- NEW: Hard truncate the response to fit Discord's 2000-char limit ---
+                    DISCORD_MAX_MESSAGE_LENGTH = 2000
+                    if len(chatbot_response) > DISCORD_MAX_MESSAGE_LENGTH:
+                        # Use 1990 to be safe and leave room for the " (...)"
+                        chatbot_response = chatbot_response[:DISCORD_MAX_MESSAGE_LENGTH - 10] + " (...)"
+                        await message.channel.send(f"{chatbot_response}\n`(Response truncated to fit Discord's message limit.)`")
+                    else:
+                        await message.channel.send(f"{chatbot_response}")
+
+                else:
+                    # Generic case for when no text content is returned
+                    print(f"Gemini response had no text content. Response: {response}")
+                    await message.channel.send("I'm sorry, I couldn't generate a response for that. It might be outside my capabilities or subject to safety guidelines.")
+
+            except Exception as e:
+                print(f"Error during Gemini API call: {e}")
+                error_msg = await message.channel.send("I'm sorry, I encountered an issue processing your request. Please try again later.")
+                await asyncio.sleep(error_message_lifetime)
+                try: await error_msg.delete()
+                except discord.NotFound: pass
+        finally:
+            await typing_task.__aexit__(None, None, None)
         return
 
     if message.content.startswith(client.command_prefix) and not message.content.startswith(f'{client.command_prefix}moderators'):
