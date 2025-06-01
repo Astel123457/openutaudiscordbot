@@ -258,15 +258,9 @@ async def set_image(ctx: commands.Context, command: str):
     if not ctx.message.attachments:
         await ctx.send("You must provide an image. (Links are not supported at this time)")
         return
-    
+
     image_path = await ctx.message.attachments[0].save(command + ".png")  # this is the image that is being sent
     conf["image"] = command + ".png"  
-
-    image_filename = ctx.message.attachments[0].filename
-    image_path = os.path.join("images", image_filename)
-    os.makedirs(os.path.dirname(image_path), exist_ok=True)
-    await ctx.message.attachments[0].save(image_path)
-    conf["image"] = image_path
 
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
@@ -663,9 +657,39 @@ async def import_config(ctx: commands.Context):
         except discord.NotFound:
             pass
 
+=======
+@client.command()
+async def get_config(ctx: discord.Interaction):
+    global config
     if ctx.author.id not in config["moderators"]:
-        await send_temp_error("You do not have permission to use this command.")
+        await ctx.send("You do not have permission to use this command.")
         return
+
+    # If the user uploads a file, load and save it as config.json
+    if hasattr(ctx.message, "attachments") and ctx.message.attachments:
+        attachment = ctx.message.attachments[0]
+        if attachment.filename.endswith(".json"):
+            file_bytes = await attachment.read()
+            try:
+                config = json.loads(file_bytes.decode("utf-8"))
+                with open("config.json", "w") as f:
+                    json.dump(config, f, indent=4)
+                await ctx.send("The config file has been updated successfully.")
+            except Exception as e:
+                await ctx.send(f"Failed to load config: {e}")
+        else:
+            await ctx.send("Please upload a valid JSON file.")
+    else:
+        # Otherwise, send the current config.json file
+        if os.path.exists("config.json"):
+            await ctx.send(file=discord.File("config.json"))
+        else:
+            await ctx.send("The config file does not exist.")
+
+@client.command()
+async def list_commands(ctx: discord.Interaction, page_or_filter: str = None):
+    global command_list
+    pages, num_pages = split_list(command_list, 10)
 
     if not ctx.message.attachments:
         await send_temp_error("Please attach a JSON file to import.")
