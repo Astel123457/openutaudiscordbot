@@ -99,7 +99,6 @@ async def on_message(message: discord.Message):
             temperature=0.7,
             safe_prompt=True,
             max_tokens=1000,
-            json_format=True,
             top_p=0.95,
             )
             async for chunk in response:
