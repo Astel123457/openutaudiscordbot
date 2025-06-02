@@ -103,12 +103,12 @@ async def on_message(message: discord.Message):
             )
             async for chunk in response:
                 if chunk.data.choices[0].delta.content:
-                    full_output += chunk.choices[0].delta.content
+                    full_output += chunk.data.choices[0].delta.content
                     if len(full_output) + 3 > 2000:
-                        current_message_content = chunk.choices[0].delta.content
+                        current_message_content = chunk.data.choices[0].delta.content
                         main_message = await message.channel.send("...")
                     else:
-                        current_message_content += chunk.choices[0].delta.content
+                        current_message_content += chunk.data.choices[0].delta.content
                 if chunk.data.choices[0].finish_reason != None:
                     await main_message.edit(content=current_message_content)
                     # Append the full output to the channel's history
@@ -119,7 +119,7 @@ async def on_message(message: discord.Message):
                     continue #restart the loop if it's not been a second since the last message was sent/edited, to avoid rate limiting
                 else:
                     last_sent = time.time()
-                    await  main_message.edit(content=current_message_content+"...")
+                    await main_message.edit(content=current_message_content+"...")
                     
 
     if message.content.startswith(client.command_prefix) and not message.content.startswith(f'{client.command_prefix}moderators'):
