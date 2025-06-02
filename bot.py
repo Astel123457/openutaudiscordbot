@@ -102,7 +102,6 @@ async def on_message(message: discord.Message):
             top_p=0.95,
             )
             async for chunk in response:
-                print(chunk)
                 if chunk.data.choices[0].delta.content:
                     full_output += chunk.data.choices[0].delta.content
                     if len(full_output) + 3 > 2000:
@@ -117,7 +116,7 @@ async def on_message(message: discord.Message):
                     break
                 time_delta = last_sent - time.time()
                 print(f"Time since last message sent/edited: {time_delta:.2f} seconds")
-                if time_delta < .6:
+                if abs(time_delta) < 0.6:
                     continue #restart the loop if it's not been about .6 seconds since the last message was sent/edited, to avoid rate limiting
                 else:
                     last_sent = time.time()
