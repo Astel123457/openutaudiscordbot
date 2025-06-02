@@ -102,6 +102,7 @@ async def on_message(message: discord.Message):
             top_p=0.95,
             )
             async for chunk in response:
+                print(chunk)
                 if chunk.data.choices[0].delta.content:
                     full_output += chunk.data.choices[0].delta.content
                     if len(full_output) + 3 > 2000:
@@ -115,8 +116,8 @@ async def on_message(message: discord.Message):
                     channel_based_message_history[channel_id].append({"role": "assistant", "content": [{"type": "text", "text": full_output}]})
                     break
                 time_delta = last_sent - time.time()
-                if time_delta < 1:
-                    continue #restart the loop if it's not been a second since the last message was sent/edited, to avoid rate limiting
+                if time_delta < .6:
+                    continue #restart the loop if it's not been about .6 seconds since the last message was sent/edited, to avoid rate limiting
                 else:
                     last_sent = time.time()
                     await main_message.edit(content=current_message_content+"...")
@@ -125,7 +126,6 @@ async def on_message(message: discord.Message):
     if message.content.startswith(client.command_prefix) and not message.content.startswith(f'{client.command_prefix}moderators'):
         command_name = message.content[len(client.command_prefix):].split()[0]
         conf = config.get(command_name, None)
-        print(f"Attempting to process dynamic command: {command_name}, config: {conf}")
 
         if conf is not None: # If the command exists in config
             info = conf.get("info", None)
