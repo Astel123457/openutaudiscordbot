@@ -4,22 +4,19 @@ import asyncio
 from difflib import get_close_matches
 import os
 import json
+from mistralai import Mistral
 import secretsd as sec
-import google.generativeai as genai
-from io import BytesIO
-from PIL import Image
+import time
 
 # --- Configuration and Initialization ---
 token = sec.discord_token
-gemini_api_key = sec.gemini_api_key
+mistral_api_key = sec.mistral_api_key
 
 # Ensure intents are correctly set for message content and reactions
 intents = discord.Intents.default()
 intents.message_content = True
 intents.reactions = True # Crucial for reaction-based pagination
-genai.configure(api_key=gemini_api_key)
-gemini_model = genai.GenerativeModel('gemini-2.0-flash')
-
+mistral_client = Mistral(api_key=mistral_api_key)
 
 # Load or create config.json
 if not os.path.exists("config.json"):
@@ -29,6 +26,7 @@ with open("config.json", "r") as f:
     config = json.load(f)
 
 command_list = []
+channel_based_message_history = {}
 
 def update_command_list():
     """Updates the global command_list from the current config."""
@@ -42,10 +40,9 @@ def update_command_list():
     command_list.clear()
     internal_commands = ["make_command", "set_info", "set_image", "moderators",
                          "remove_command", "add_bot_moderator", "rename_command",
-                         "list_commands", "import_config"]
+                         "list_commands", "bot_config", ]
     command_list.extend([cmd for cmd in config.keys() if cmd not in internal_commands])
     command_list.sort()
-    print("Command list updated:", command_list) # For debugging purposes
 
 update_command_list()
 
@@ -70,113 +67,61 @@ async def get_message_history(channel, limit=10):
     return "\n".join(reversed(messages))
 
 @client.event
-async def on_message(message):
+async def on_message(message: discord.Message):
     if message.author == client.user:
         return
     
-    starts_with_prefix = message.content.startswith('?')
+    starts_with_prefix = message.content.startswith('=')
+    last_sent = time.time()
     if starts_with_prefix:
-        user_prompt = message.content[1:].strip()
-
-        # --- DIAGNOSTIC PRINT (TEMPORARY - REMOVE IN PRODUCTION!) ---
-        print(f"DEBUG: Chatbot prompt received: '{user_prompt}' (Length: {len(user_prompt)} chars)")
-        print(f"DEBUG: Loaded Gemini API Key starts with: {gemini_api_key[:5]}...")
-
-        error_message_lifetime = 15
-        typing_task = message.channel.typing()
-        await typing_task.__aenter__()
-
-        try:
-            if not user_prompt and not message.attachments:  # Check for both text and attachments
-                temp_msg = await message.channel.send("Please provide a question/prompt or attach an image/file after the `?`.")
-                await asyncio.sleep(10)
-                try: await temp_msg.delete()
-                except discord.NotFound: pass
-                return
-
-            # --- Handle Attachments ---
-            attachment_data = []
+        if not message.author.id in config.get("moderators", []):
+            await message.channel.send("Only trusted users are allowed to use the AI chat function for the moment.")
+            return
+        prompt = message.content[1:].strip()
+        #Get the channel ID to use as a key for message history
+        channel_id = str(message.channel.id)
+        if channel_id not in channel_based_message_history:
+            channel_based_message_history[channel_id] = []
+        # Append the new message to the channel's history
+        mess = {"role": "user", "content": [ {"type": "text", "text": prompt}]}
+        if message.attachments:
             for attachment in message.attachments:
-                if attachment.content_type.startswith('image/'):
-                    # Download the image
-                    image_bytes = await attachment.read()
-                    image = Image.open(BytesIO(image_bytes))
-                    attachment_data.append(image)
-                elif attachment.content_type.startswith('text/'):
-                    text_content = await attachment.read()
-                    try:
-                        text_content = text_content.decode('utf-8')
-                        user_prompt += f"\n\nAttached Text File Content:\n{text_content}"
-                    except UnicodeDecodeError:
-                        print(f"Warning: Could not decode text file {attachment.filename}. Skipping its content.")
-                else:
-                    print(f"Unsupported attachment type: {attachment.content_type}. Skipping {attachment.filename}.")
-
-            # Setting a hard limit on the *user's input* length before sending to AI
-            MAX_USER_PROMPT_LENGTH = 400
-            if len(user_prompt) > MAX_USER_PROMPT_LENGTH:
-                error_msg_content = (
-                    f"Your message is too long ({len(user_prompt)} characters). "
-                    f"Please keep your prompts to {MAX_USER_PROMPT_LENGTH} characters or fewer."
-                )
-                error_msg = await message.channel.send(error_msg_content)
-                await asyncio.sleep(error_message_lifetime)
-                try: await error_msg.delete()
-                except discord.NotFound: pass
-                return
-
-            try:
-                # --- Get message history ---
-                message_history = await get_message_history(message.channel)
-                # --- Modify the prompt to instruct the AI to be concise and consider history ---
-                ai_prompt_for_model = f"Previous conversation:\n{message_history}\n\nUser's current input: {user_prompt}\n\nPlease keep your answer concise and under 1950 characters."
-
-                if attachment_data:
-                    # If there are images, create the parts list
-                    parts = [ai_prompt_for_model] + attachment_data
-                    response = await asyncio.to_thread(gemini_model.generate_content, parts)
-                else:
-                    response = await asyncio.to_thread(gemini_model.generate_content, ai_prompt_for_model)
-
-                # Check for prompt feedback that might indicate safety issues
-                if response.prompt_feedback and response.prompt_feedback.block_reason:
-                    block_reason = response.prompt_feedback.block_reason.name
-                    print(f"Gemini blocked prompt due to: {block_reason}")
-                    await message.channel.send(
-                        f"I'm sorry, I couldn't generate a response for that. It was blocked due to `{block_reason}` safety reasons."
-                    )
-                # Check if candidates exist and have content
-                elif response.candidates and response.candidates[0].content and response.candidates[0].content.parts:
-                    full_chatbot_response_parts = []
-                    for part in response.candidates[0].content.parts:
-                        if hasattr(part, 'text'):
-                            full_chatbot_response_parts.append(part.text)
-
-                    chatbot_response = "".join(full_chatbot_response_parts)
-
-                    # --- NEW: Hard truncate the response to fit Discord's 2000-char limit ---
-                    DISCORD_MAX_MESSAGE_LENGTH = 2000
-                    if len(chatbot_response) > DISCORD_MAX_MESSAGE_LENGTH:
-                        # Use 1990 to be safe and leave room for the " (...)"
-                        chatbot_response = chatbot_response[:DISCORD_MAX_MESSAGE_LENGTH - 10] + " (...)"
-                        await message.channel.send(f"{chatbot_response}\n`(Response truncated to fit Discord's message limit.)`")
+                mess["content"].append({"type": "image_url", "image_url": attachment.url})
+        channel_based_message_history[channel_id].append(mess)
+        full_output = "" # we use this to store the full output from the model, then we'll append this to the channel history
+        current_message_content = "" #we will erase the content in this if the output is too long
+        async with message.channel.typing():
+            main_message = await message.channel.send("...")
+            response = await mistral_client.chat.stream_async(
+            messages=channel_based_message_history[channel_id],\
+            #TODO: use a custom fine-tuned model specific to OpenUtau, once trained
+            model="pixtral-12b-latest",
+            temperature=0.7,
+            safe_prompt=True,
+            max_tokens=1000,
+            json_format=True,
+            top_p=0.95,
+            )
+            async for chunk in response:
+                if chunk.data.choices[0].delta.content:
+                    full_output += chunk.choices[0].delta.content
+                    if len(full_output) + 3 > 2000:
+                        current_message_content = chunk.choices[0].delta.content
+                        main_message = await message.channel.send("...")
                     else:
-                        await message.channel.send(f"{chatbot_response}")
-
+                        current_message_content += chunk.choices[0].delta.content
+                if chunk.data.choices[0].finish_reason != None:
+                    await main_message.edit(content=current_message_content)
+                    # Append the full output to the channel's history
+                    channel_based_message_history[channel_id].append({"role": "assistant", "content": [{"type": "text", "text": full_output}]})
+                    break
+                time_delta = last_sent - time.time()
+                if time_delta < 1:
+                    continue #restart the loop if it's not been a second since the last message was sent/edited, to avoid rate limiting
                 else:
-                    # Generic case for when no text content is returned
-                    print(f"Gemini response had no text content. Response: {response}")
-                    await message.channel.send("I'm sorry, I couldn't generate a response for that. It might be outside my capabilities or subject to safety guidelines.")
-
-            except Exception as e:
-                print(f"Error during Gemini API call: {e}")
-                error_msg = await message.channel.send("I'm sorry, I encountered an issue processing your request. Please try again later.")
-                await asyncio.sleep(error_message_lifetime)
-                try: await error_msg.delete()
-                except discord.NotFound: pass
-        finally:
-            await typing_task.__aexit__(None, None, None)
-        return
+                    last_sent = time.time()
+                    await  main_message.edit(content=current_message_content+"...")
+                    
 
     if message.content.startswith(client.command_prefix) and not message.content.startswith(f'{client.command_prefix}moderators'):
         command_name = message.content[len(client.command_prefix):].split()[0]
@@ -235,6 +180,19 @@ def autocorrect_command(command_name):
     close_matches = get_close_matches(command_name, command_list, n=10, cutoff=0.1)
     combined_matches = list(dict.fromkeys(substring_matches + close_matches))
     return combined_matches
+
+async def send_temp_error(ctx: discord.Interaction, message_content: str, error_message_lifetime: int = 10):
+        embed = discord.Embed(
+            description=message_content,
+            color=discord.Color.red()
+        )
+        embed.set_footer(text=f"This message will remove in {error_message_lifetime} seconds.")
+        msg = await ctx.send(embed=embed)
+        await asyncio.sleep(error_message_lifetime)
+        try:
+            await msg.delete()
+        except discord.NotFound:
+            pass
 
 # --- Bot Commands ---
 @client.command()
@@ -459,10 +417,11 @@ async def rename_command(ctx: commands.Context, old_name: str, new_name: str):
     await ctx.send(f"The command `{old_name}` has been renamed to `{new_name}` successfully!")
 
 @client.command()
-async def get_config(ctx: discord.Interaction):
+async def bot_config(ctx: discord.Interaction):
+    error_message_lifetime = 30
     global config
     if ctx.author.id not in config["moderators"]:
-        await ctx.send("You do not have permission to use this command.")
+        await send_temp_error(ctx, "You do not have permission to use this command.", 10)
         return
 
     # If the user uploads a file, load and save it as config.json
@@ -474,17 +433,18 @@ async def get_config(ctx: discord.Interaction):
                 config = json.loads(file_bytes.decode("utf-8"))
                 with open("config.json", "w") as f:
                     json.dump(config, f, indent=4)
+                update_command_list()
                 await ctx.send("The config file has been updated successfully.")
             except Exception as e:
-                await ctx.send(f"Failed to load config: {e}")
+                await send_temp_error(ctx, f"Failed to load config: {e}", error_message_lifetime)
         else:
-            await ctx.send("Please upload a valid JSON file.")
+            await send_temp_error(ctx, "Please upload a valid JSON file.", error_message_lifetime)
     else:
         # Otherwise, send the current config.json file
         if os.path.exists("config.json"):
             await ctx.send(file=discord.File("config.json"))
         else:
-            await ctx.send("The config file does not exist.")
+            await send_temp_error(ctx, "The config file does not exist.", error_message_lifetime)
 
 @client.command(name='list_commands', aliases=['commands', 'helpme'])
 async def list_commands(ctx: commands.Context, *, page_or_filter: str = None):
@@ -656,74 +616,5 @@ async def import_config(ctx: commands.Context):
             await msg.delete()
         except discord.NotFound:
             pass
-
-=======
-@client.command()
-async def get_config(ctx: discord.Interaction):
-    global config
-    if ctx.author.id not in config["moderators"]:
-        await ctx.send("You do not have permission to use this command.")
-        return
-
-    # If the user uploads a file, load and save it as config.json
-    if hasattr(ctx.message, "attachments") and ctx.message.attachments:
-        attachment = ctx.message.attachments[0]
-        if attachment.filename.endswith(".json"):
-            file_bytes = await attachment.read()
-            try:
-                config = json.loads(file_bytes.decode("utf-8"))
-                with open("config.json", "w") as f:
-                    json.dump(config, f, indent=4)
-                await ctx.send("The config file has been updated successfully.")
-            except Exception as e:
-                await ctx.send(f"Failed to load config: {e}")
-        else:
-            await ctx.send("Please upload a valid JSON file.")
-    else:
-        # Otherwise, send the current config.json file
-        if os.path.exists("config.json"):
-            await ctx.send(file=discord.File("config.json"))
-        else:
-            await ctx.send("The config file does not exist.")
-
-@client.command()
-async def list_commands(ctx: discord.Interaction, page_or_filter: str = None):
-    global command_list
-    pages, num_pages = split_list(command_list, 10)
-
-    if not ctx.message.attachments:
-        await send_temp_error("Please attach a JSON file to import.")
-        return
-
-    attachment = ctx.message.attachments[0]
-
-    if not attachment.filename.lower().endswith(".json"):
-        await send_temp_error("The attached file does not appear to be a JSON file. Please attach a file ending with `.json`.")
-        return
-
-    try:
-        file_content_bytes = await attachment.read()
-        file_content_str = file_content_bytes.decode('utf-8')
-
-        new_config_data = json.loads(file_content_str)
-
-        if not isinstance(new_config_data, dict) or "moderators" not in new_config_data:
-            await send_temp_error("The attached JSON file seems to be malformed or missing the 'moderators' key. Please ensure it's a valid config structure.")
-            return
-        
-        # Overwrite the config.json file on disk
-        with open("config.json", "w") as f:
-            json.dump(new_config_data, f, indent=4)
-        
-        update_command_list()
-
-        # Success message will NOT go away
-        await ctx.send("`config.json` imported successfully! Bot commands and settings have been updated.")
-
-    except json.JSONDecodeError as e:
-        await send_temp_error(f"The attached file could not be parsed as valid JSON. Please check its format. Error: `{e}`")
-    except Exception as e:
-        print(f"An unexpected error occurred during config import: {e}")
-        await send_temp_error(f"An unexpected error occurred while importing the config: `{e}`")
 
 client.run(token)
