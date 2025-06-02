@@ -116,6 +116,7 @@ async def on_message(message: discord.Message):
                     channel_based_message_history[channel_id].append({"role": "assistant", "content": [{"type": "text", "text": full_output}]})
                     break
                 time_delta = last_sent - time.time()
+                print(f"Time since last message sent/edited: {time_delta:.2f} seconds")
                 if time_delta < .6:
                     continue #restart the loop if it's not been about .6 seconds since the last message was sent/edited, to avoid rate limiting
                 else:
