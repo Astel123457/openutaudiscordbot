@@ -95,7 +95,7 @@ async def on_message(message: discord.Message):
             response = await mistral_client.chat.stream_async(
             messages=channel_based_message_history[channel_id],\
             #TODO: use a custom fine-tuned model specific to OpenUtau, once trained
-            model="pixtral-12b-latest",
+            model="mistral-medium-latest",
             temperature=0.7,
             safe_prompt=True,
             max_tokens=1000,
