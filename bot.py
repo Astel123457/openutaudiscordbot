@@ -119,6 +119,7 @@ async def on_message(message: discord.Message):
                     await main_message.edit(content=current_message_content)
                     # Append the full output to the channel's history
                     channel_based_message_history[channel_id].append({"role": "assistant", "content": [{"type": "text", "text": full_output}]})
+                    print(channel_based_message_history[channel_id])
                     break
                 time_delta = last_sent - time.time()
                 if abs(time_delta) < 0.9:
