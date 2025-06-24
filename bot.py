@@ -91,6 +91,7 @@ async def on_message(message: discord.Message):
                 if attachment.url.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
                     mess["content"].append({"type": "image_url", "image_url": attachment.url})
                 if attachment.url.endswith(('.txt', ".py", ".json", ".md")): # we can add more file types here if needed
+                    print(f"Reading attachment: {attachment.filename}")
                     attachment_content = await attachment.read()
                     mess["content"].append({"type": "text", "text": f"Attached file: {attachment_content}"})
         channel_based_message_history[channel_id].append(mess)
