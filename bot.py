@@ -27,6 +27,10 @@ with open("config.json", "r") as f:
 
 command_list = []
 channel_based_message_history = {}
+# made it into a global constant
+INTERNAL_COMMANDS = ["make_command", "set_info", "set_image", "moderators",
+                         "remove_command", "add_bot_moderator", "rename_command",
+                         "list_commands", "bot_config", "bot_commands" ]
 
 def update_command_list():
     """Updates the global command_list from the current config."""
@@ -38,10 +42,7 @@ def update_command_list():
         config.update(json.load(f))
 
     command_list.clear()
-    internal_commands = ["make_command", "set_info", "set_image", "moderators",
-                         "remove_command", "add_bot_moderator", "rename_command",
-                         "list_commands", "bot_config", ]
-    command_list.extend([cmd for cmd in config.keys() if cmd not in internal_commands])
+    command_list.extend([cmd for cmd in config.keys() if cmd not in INTERNAL_COMMANDS])
     command_list.sort()
 
 update_command_list()
@@ -447,110 +448,97 @@ async def bot_config(ctx: discord.Interaction):
 @client.command(name='list_commands', aliases=['commands', 'helpme'])
 async def list_commands(ctx: commands.Context, *, page_or_filter: str = None):
     """
-    Lists all available commands, paginated, with interactive navigation.
+    Lists all *user-defined* custom commands, paginated, with interactive navigation.
     You can also search for a specific command.
     Usage: !list_commands [page_number|command_name]
     """
     update_command_list()
 
     COMMANDS_PER_PAGE = 10
-    command_pages, num_pages = split_list(command_list, COMMANDS_PER_PAGE)
-    current_page = 0
+    
+    # reworked
+    if page_or_filter and not page_or_filter.isdigit():
+        # Case 1: Search query
+        search_query = page_or_filter
+        commands_to_display_base = autocorrect_command(search_query)
+        embed_title_prefix = f"User-Defined Commands matching '{search_query}'"
+        no_results_message = f"No user-defined commands matching '{search_query}' were found."
+        initial_page_index = 0
+        embed_color = discord.Color.blue()
+    else:
+        # Case 2: No argument or page number specified
+        commands_to_display_base = command_list
+        embed_title_prefix = "Available Commands"
+        no_results_message = "It seems there are no user-defined commands to display yet."
+        embed_color = discord.Color.green()
+        initial_page_index = 0 
 
-    if not command_list: # Case 1: No commands available
+        # If a page number was provided, try to use it
+        if page_or_filter and page_or_filter.isdigit():
+            try:
+                requested_page = int(page_or_filter) - 1
+                initial_page_index = requested_page
+            except ValueError:
+                pass
+
+    # Handle cases where the base list of commands is empty (e.g., no commands at all, or no search results)
+    if not commands_to_display_base:
         embed = discord.Embed(
-            title="No Commands Available",
-            description="It seems there are no custom commands to display yet. Moderators can create them using `!make_command`.",
-            color=discord.Color.orange()
+            title="No User-Defined Commands Available" if not page_or_filter else "No Commands Found",
+            description=no_results_message,
+            color=discord.Color.red()
         )
         embed.set_footer(text="This message will disappear in 60 seconds.")
         msg = await ctx.send(embed=embed)
         await asyncio.sleep(60)
-        try:
-            await msg.delete()
-        except discord.NotFound:
-            pass
+        try: await msg.delete()
+        except discord.NotFound: pass
         return
+    command_pages, num_pages = split_list(commands_to_display_base, COMMANDS_PER_PAGE)
 
-    # Handle filtering by command name (Case 2: Search query)
-    if page_or_filter and not page_or_filter.isdigit():
-        search_query = page_or_filter
-        found_commands = autocorrect_command(search_query)
-        if found_commands:
-            embed = discord.Embed(
-                title=f"Commands matching '{search_query}'",
-                description="\n".join(found_commands),
-                color=discord.Color.blue()
-            )
-            embed.set_footer(text="This search result will disappear in 60 seconds.")
-            msg = await ctx.send(embed=embed)
-        else:
-            embed = discord.Embed(
-                title="No Commands Found",
-                description=f"No commands matching '{search_query}' were found. Try `!list_commands` to see all commands.",
-                color=discord.Color.red()
-            )
-            embed.set_footer(text="This message will disappear in 60 seconds.")
-            msg = await ctx.send(embed=embed)
+    # Validate initial_page_index (important if user provided invalid page number)
+    current_page = initial_page_index
+    if not (0 <= current_page < num_pages):
+        current_page = 0
+        embed_title_prefix = "Invalid Page Number"
+        no_results_message = f"Page number must be between 1 and {num_pages}. Showing page 1 instead."
+        embed_color = discord.Color.red()
 
-        await asyncio.sleep(60)
-        try:
-            await msg.delete()
-        except discord.NotFound:
-            pass
-        return
-
-    # Handle direct page number input (Case 3: Invalid page number)
-    if page_or_filter and page_or_filter.isdigit():
-        try:
-            requested_page = int(page_or_filter) - 1
-            if not (0 <= requested_page < num_pages):
-                embed = discord.Embed(
-                    title="Invalid Page Number",
-                    description=f"Page number must be between 1 and {num_pages}.",
-                    color=discord.Color.red()
-                )
-                embed.set_footer(text="This message will disappear in 60 seconds.")
-                msg = await ctx.send(embed=embed)
-                await asyncio.sleep(60)
-                try:
-                    await msg.delete()
-                except discord.NotFound:
-                    pass
-                return 
-            current_page = requested_page 
-        except ValueError:
-            pass
-
-    # --- Embed Creation and Initial Send (This part is for the interactive pagination) ---
-    def create_commands_embed(page_index):
-        if not command_pages or not (0 <= page_index < len(command_pages)):
+    def create_commands_embed(page_idx, total_pages_count, current_list, initial_color):
+        if not current_list or not (0 <= page_idx < len(current_list)):
             return discord.Embed(
                 title="Error Displaying Commands",
                 description="Could not find commands for this page.",
                 color=discord.Color.red()
             )
 
-        commands_on_page = command_pages[page_index]
+        commands_on_page = current_list[page_idx]
         commands_str = "\n".join(commands_on_page)
 
+        # Adjust title based on context (search vs full list)
+        title = embed_title_prefix if embed_title_prefix else "Available Commands"
+        if no_results_message and not commands_on_page:
+             description = no_results_message
+        else:
+            description = f"Here are the commands you can use:\n\n{commands_str}"
+
         embed = discord.Embed(
-            title="Available Commands",
-            description=f"Here are the commands you can use:\n\n{commands_str}",
-            color=discord.Color.green()
+            title=title,
+            description=description,
+            color=initial_color
         )
-        embed.set_footer(text=f"Page {page_index + 1}/{num_pages} | React to navigate. This message will expire in 60 seconds.")
+        embed.set_footer(text=f"Page {page_idx + 1}/{total_pages_count} | React to navigate. This message will expire in 60 seconds.")
         return embed
+    message = await ctx.send(embed=create_commands_embed(current_page, num_pages, command_pages, embed_color))
 
-    message = await ctx.send(embed=create_commands_embed(current_page))
-
-    # --- Add Reactions for Navigation ---
+    # Add reactions for navigation
     if num_pages > 1:
         await message.add_reaction("◀️")
         await message.add_reaction("▶️")
         await message.add_reaction("❌")
+    else:
+        await message.add_reaction("❌")
 
-    # --- Reaction Listener Loop ---
     def check(reaction, user):
         return (user == ctx.author and
                 str(reaction.emoji) in ["◀️", "▶️", "❌"] and
@@ -571,16 +559,16 @@ async def list_commands(ctx: commands.Context, *, page_or_filter: str = None):
                 current_page = (current_page - 1 + num_pages) % num_pages
             elif str(reaction.emoji) == "❌":
                 await message.delete()
-                print("Interaction closed by user.")
+                print("User-defined command interaction closed by user.")
                 return
 
-            await message.edit(embed=create_commands_embed(current_page))
+            await message.edit(embed=create_commands_embed(current_page, num_pages, command_pages, embed_color))
 
         except asyncio.TimeoutError:
-            print("Command pagination timed out.")
+            print("User-defined command pagination timed out.")
             try:
                 await message.clear_reactions()
-                expired_embed = create_commands_embed(current_page)
+                expired_embed = create_commands_embed(current_page, num_pages, command_pages, embed_color)
                 expired_embed.set_footer(text="This command navigation has expired.")
                 expired_embed.color = discord.Color.greyple()
                 await message.edit(embed=expired_embed)
@@ -588,7 +576,7 @@ async def list_commands(ctx: commands.Context, *, page_or_filter: str = None):
                 print("Could not clear reactions. Check bot permissions.")
             break
         except Exception as e:
-            print(f"An unexpected error occurred during pagination: {e}")
+            print(f"An unexpected error occurred during user-defined command pagination: {e}")
             break
     
 # --- Import Config Command ---
@@ -622,5 +610,111 @@ async def import_config(ctx: commands.Context):
     update_command_list()
     await ctx.send("Configuration imported successfully.")
 
+# --- NEW COMMAND: !bot_commands ---
+@client.command(name='bot_commands')
+async def bot_commands(ctx: commands.Context, page: int = 1):
+    """
+    Lists the bot's internal management commands.
+    Only accessible by moderators.
+    Usage: !bot_commands [page_number]
+    """
+    if ctx.author.id not in config["moderators"]:
+        error_msg = await ctx.send("You do not have permission to use this command.")
+        await asyncio.sleep(15) # Shorter timeout for permission errors
+        try: await error_msg.delete()
+        except discord.NotFound: pass
+        return
+
+    commands_to_display = sorted(INTERNAL_COMMANDS)
+    COMMANDS_PER_PAGE = 10
+    command_pages, num_pages = split_list(commands_to_display, COMMANDS_PER_PAGE)
+
+    if not commands_to_display:
+        embed = discord.Embed(
+            title="No Internal Bot Commands Available",
+            description="It seems there are no internal bot commands to display.",
+            color=discord.Color.orange()
+        )
+        embed.set_footer(text="This message will disappear in 60 seconds.")
+        msg = await ctx.send(embed=embed)
+        await asyncio.sleep(60)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
+
+    current_page_index = page - 1
+    if not (0 <= current_page_index < num_pages):
+        embed = discord.Embed(
+            title="Invalid Page Number",
+            description=f"Page number must be between 1 and {num_pages}.",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="This message will disappear in 60 seconds.")
+        msg = await ctx.send(embed=embed)
+        await asyncio.sleep(60)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
+
+    def create_bot_commands_embed(page_idx, total_pages_count):
+        commands_on_page = command_pages[page_idx]
+        commands_str = "\n".join(commands_on_page)
+        
+        embed = discord.Embed(
+            title="Bot Management Commands",
+            description=f"These are the bot's internal commands:\n\n{commands_str}",
+            color=discord.Color.purple() # A different color for management commands
+        )
+        embed.set_footer(text=f"Page {page_idx + 1}/{total_pages_count} | React to navigate. This message will expire in 60 seconds.")
+        return embed
+
+    message = await ctx.send(embed=create_bot_commands_embed(current_page_index, num_pages))
+
+    if num_pages > 1:
+        await message.add_reaction("◀️")
+        await message.add_reaction("▶️")
+        await message.add_reaction("❌")
+    else:
+        await message.add_reaction("❌")
+
+    def check_reaction(reaction, user):
+        return (user == ctx.author and
+                str(reaction.emoji) in ["◀️", "▶️", "❌"] and
+                reaction.message.id == message.id)
+
+    while True:
+        try:
+            reaction, user = await client.wait_for("reaction_add", timeout=60.0, check=check_reaction)
+
+            try:
+                await message.remove_reaction(reaction, user)
+            except discord.HTTPException:
+                print(f"Could not remove reaction: {reaction.emoji} by {user.name}. Check bot permissions.")
+
+            if str(reaction.emoji) == "▶️":
+                current_page_index = (current_page_index + 1) % num_pages
+            elif str(reaction.emoji) == "◀️":
+                current_page_index = (current_page_index - 1 + num_pages) % num_pages
+            elif str(reaction.emoji) == "❌":
+                await message.delete()
+                print("Bot management command interaction closed by user.")
+                return
+
+            await message.edit(embed=create_bot_commands_embed(current_page_index, num_pages))
+
+        except asyncio.TimeoutError:
+            print("Bot management command pagination timed out.")
+            try:
+                await message.clear_reactions()
+                expired_embed = create_bot_commands_embed(current_page_index, num_pages)
+                expired_embed.set_footer(text="This command navigation has expired.")
+                expired_embed.color = discord.Color.greyple()
+                await message.edit(embed=expired_embed)
+            except discord.HTTPException:
+                print("Could not clear reactions. Check bot permissions.")
+            break
+        except Exception as e:
+            print(f"An unexpected error occurred during bot management command pagination: {e}")
+            break
 
 client.run(token)
