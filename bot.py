@@ -7,6 +7,7 @@ import json
 from mistralai import Mistral
 import secretsd as sec #TODO: switch to using environment variables or a more secure method for storing sensitive information
 import time
+import datetime
 
 # --- Configuration and Initialization ---
 token = sec.discord_token
@@ -253,15 +254,19 @@ async def start_finetuning(ctx: commands.Context):
 @client.command()
 async def end_finetuning(ctx: commands.Context):
     """
-    Ends the finetuning process by saving the current channel's chat history to a JSON file.
+    Ends the finetuning process by saving the current channel's chat history to a uniquely named JSON file.
     The file is saved in the 'finetuning-data' folder, which is created if it doesn't exist.
     """
+
     channel_id = str(ctx.channel.id)
     history = channel_based_message_history.get(channel_id, [])
 
     # Ensure the folder exists
     os.makedirs("finetuning-data", exist_ok=True)
-    filename = f"finetuning-data/history_{channel_id}.json"
+
+    # Generate a unique filename using timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"finetuning-data/history_{channel_id}_{timestamp}.json"
 
     try:
         with open(filename, "w", encoding="utf-8") as f:
