@@ -88,9 +88,9 @@ async def on_message(message: discord.Message):
         mess = {"role": "user", "content": [ {"type": "text", "text": prompt}]}
         if message.attachments:
             for attachment in message.attachments:
-                if attachment.url.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
+                if attachment.filename.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
                     mess["content"].append({"type": "image_url", "image_url": attachment.url})
-                if attachment.url.endswith((".txt", ".py", ".json", ".md")): # we can add more file types here if needed
+                if attachment.filename.endswith((".txt", ".py", ".json", ".md")): # we can add more file types here if needed
                     attachment_content = str(await attachment.read())
                     mess["content"].append({"type": "text", "text": f"Attached file: {attachment_content}"})
         channel_based_message_history[channel_id].append(mess)
@@ -119,7 +119,6 @@ async def on_message(message: discord.Message):
                     await main_message.edit(content=current_message_content)
                     # Append the full output to the channel's history
                     channel_based_message_history[channel_id].append({"role": "assistant", "content": [{"type": "text", "text": full_output}]})
-                    print(channel_based_message_history[channel_id])
                     break
                 time_delta = last_sent - time.time()
                 if abs(time_delta) < 0.9:
