@@ -5,7 +5,7 @@ from difflib import get_close_matches
 import os
 import json
 from mistralai import Mistral
-import secretsd as sec
+import secretsd as sec #TODO: switch to using environment variables or a more secure method for storing sensitive information
 import time
 
 # --- Configuration and Initialization ---
@@ -224,6 +224,43 @@ async def set_image(ctx: commands.Context, command: str):
 
     update_command_list() 
     await ctx.send(f"The image for the command `{command}` has been set successfully!")
+
+    @client.command()
+    async def start_finetuning(ctx: commands.Context):
+        """
+        Placeholder for starting finetuning.
+        """
+        await ctx.send("Starting Finetuning. (Warning, this command currently does nothing, nothing is being finetuned until implementation)")
+
+    @client.command()
+    async def end_finetuning(ctx: commands.Context):
+        """
+        Placeholder for ending finetuning.
+        """
+        await ctx.send("Ending Finetuning. (Warning, this command currently does nothing, nothing is being finetuned until implementation)")
+
+    @client.command()
+    async def edit(ctx: commands.Context, *, new_content: str):
+        """
+        Edits the last message the AI sent in the current channel.
+        Usage: !edit <new_content>
+        """
+        # Only allow moderators to use this command
+        if ctx.author.id not in config.get("moderators", []):
+            await ctx.send("You do not have permission to use this command.")
+            return
+
+        # Find the last message sent by the bot in this channel
+        async for msg in ctx.channel.history(limit=50):
+            if msg.author == client.user:
+                try:
+                    await msg.edit(content=new_content)
+                    await ctx.send("The last AI message has been edited.")
+                except Exception as e:
+                    await ctx.send(f"Failed to edit the message: {e}")
+                return
+
+        await ctx.send("No recent AI message found to edit.")
 
 @client.command()
 async def set_info(ctx: commands.Context, command: str, *, info: str):
