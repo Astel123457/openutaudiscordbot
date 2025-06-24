@@ -594,25 +594,33 @@ async def list_commands(ctx: commands.Context, *, page_or_filter: str = None):
 # --- Import Config Command ---
 @client.command(name='import_config')
 async def import_config(ctx: commands.Context):
-    """
-    Imports a new config.json file, overwriting the current one.
-    Requires moderator permissions.
-    Usage: !import_config (attach config.json file)
-    """
-    error_message_lifetime = 30
+    """Imports a new config.json file, overwriting the current one."""
 
-    # Helper to send a temporary error message
-    async def send_temp_error(message_content: str):
-        embed = discord.Embed(
-            description=message_content,
-            color=discord.Color.red()
-        )
-        embed.set_footer(text=f"This message will remove in {error_message_lifetime} seconds.")
-        msg = await ctx.send(embed=embed)
-        await asyncio.sleep(error_message_lifetime)
-        try:
-            await msg.delete()
-        except discord.NotFound:
-            pass
+    # Only allow moderators to run this command
+    if ctx.author.id not in config.get("moderators", []):
+        await send_temp_error(ctx, "You do not have permission to use this command.")
+        return
+
+    if not ctx.message.attachments:
+        await send_temp_error(ctx, "You must attach a config.json file.")
+        return
+
+    attachment = ctx.message.attachments[0]
+    try:
+        file_bytes = await attachment.read()
+        new_config = json.loads(file_bytes.decode("utf-8"))
+    except Exception as e:
+        await send_temp_error(ctx, f"Failed to read config: {e}")
+        return
+
+    # Update in-memory config and save to disk
+    config.clear()
+    config.update(new_config)
+    with open("config.json", "w") as f:
+        json.dump(config, f, indent=4)
+
+    update_command_list()
+    await ctx.send("Configuration imported successfully.")
+
 
 client.run(token)
