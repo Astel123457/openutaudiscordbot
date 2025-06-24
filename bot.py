@@ -30,7 +30,7 @@ channel_based_message_history = {}
 # made it into a global constant
 INTERNAL_COMMANDS = ["make_command", "set_info", "set_image", "moderators",
                          "remove_command", "add_bot_moderator", "rename_command",
-                         "list_commands", "bot_config", "bot_commands" ]
+                         "list_commands", "bot_config", "bot_commands", "edit", "clear", "start_finetuning", "end_finetuning", "import_config"]
 
 def update_command_list():
     """Updates the global command_list from the current config."""
@@ -226,18 +226,49 @@ async def set_image(ctx: commands.Context, command: str):
     await ctx.send(f"The image for the command `{command}` has been set successfully!")
 
 @client.command()
+async def clear(ctx: commands.Context):
+    """
+    Clears the channel's message history for the AI chat.
+    Usage: !clear
+    """
+    channel_id = str(ctx.channel.id)
+    if channel_id in channel_based_message_history:
+        channel_based_message_history[channel_id] = []
+        await ctx.send("The message history for this channel has been cleared.")
+    else:
+        await ctx.send("No message history found for this channel.")
+    return
+
+@client.command()
 async def start_finetuning(ctx: commands.Context):
     """
-    Placeholder for starting finetuning.
+    Starts the finetuning process.
     """
-    await ctx.send("Starting Finetuning. (Warning, this command currently does nothing, nothing is being finetuned until implementation)")
+    if ctx.author.id not in config.get("moderators", []):
+        await ctx.send("You do not have permission to use this command.")
+        return
+    await clear(ctx)  # Clear the message history before starting finetuning
+    await ctx.send("Starting Finetuning.")
 
 @client.command()
 async def end_finetuning(ctx: commands.Context):
     """
-    Placeholder for ending finetuning.
+    Ends the finetuning process by saving the current channel's chat history to a JSON file.
+    The file is saved in the 'finetuning-data' folder, which is created if it doesn't exist.
     """
-    await ctx.send("Ending Finetuning. (Warning, this command currently does nothing, nothing is being finetuned until implementation)")
+    channel_id = str(ctx.channel.id)
+    history = channel_based_message_history.get(channel_id, [])
+
+    # Ensure the folder exists
+    os.makedirs("finetuning-data", exist_ok=True)
+    filename = f"finetuning-data/history_{channel_id}.json"
+
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(history, f, indent=4, ensure_ascii=False)
+        await ctx.send(f"Finetuning ended. Chat history saved to `{filename}`.")
+    except Exception as e:
+        await ctx.send(f"Failed to save chat history: {e}")
 
 @client.command()
 async def edit(ctx: commands.Context, *, new_content: str):
