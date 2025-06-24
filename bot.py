@@ -88,7 +88,11 @@ async def on_message(message: discord.Message):
         mess = {"role": "user", "content": [ {"type": "text", "text": prompt}]}
         if message.attachments:
             for attachment in message.attachments:
-                mess["content"].append({"type": "image_url", "image_url": attachment.url})
+                if attachment.url.endswith(('.png', '.jpg', '.jpeg', '.gif', '.webp')):
+                    mess["content"].append({"type": "image_url", "image_url": attachment.url})
+                if attachment.url.endswith(('.txt', ".py", ".json", ".md")): # we can add more file types here if needed
+                    attachment_content = await attachment.read()
+                    mess["content"].append({"type": "text", "text": f"Attached file: {attachment_content}"})
         channel_based_message_history[channel_id].append(mess)
         full_output = "" # we use this to store the full output from the model, then we'll append this to the channel history
         current_message_content = "" #we will erase the content in this if the output is too long
