@@ -7,7 +7,10 @@ import json
 from mistralai import Mistral
 import secretsd as sec #TODO: switch to using environment variables or a more secure method for storing sensitive information
 import time
-import datetime
+from datetime import datetime
+from textwrap import wrap
+import random
+import uuid
 
 # --- Configuration and Initialization ---
 token = sec.discord_token
@@ -26,12 +29,21 @@ if not os.path.exists("config.json"):
 with open("config.json", "r") as f:
     config = json.load(f)
 
+# Ensure 'stickynotes' key exists AFTER loading, for existing config files
+if "stickynotes" not in config:
+    config["stickynotes"] = {}
+    with open("config.json", "w") as f:
+        json.dump(config, f, indent=4)
+
 command_list = []
 channel_based_message_history = {}
 # made it into a global constant
 INTERNAL_COMMANDS = ["make_command", "set_info", "set_image", "moderators",
                          "remove_command", "add_bot_moderator", "rename_command",
-                         "list_commands", "bot_config", "bot_commands", "edit", "clear", "start_finetuning", "end_finetuning", "import_config"]
+                         "list_commands", "bot_config", "bot_commands", "edit",
+                         "clear", "start_finetuning", "end_finetuning", "import_config",
+                         "make_stickynote", "list_stickynote", "remove_stickynote", "stickynote",
+                         "stop"]
 
 def update_command_list():
     """Updates the global command_list from the current config."""
@@ -51,6 +63,16 @@ update_command_list()
 client = commands.Bot(command_prefix='!', intents=intents, status=discord.Status.online,
                       activity=discord.Activity(type=discord.ActivityType.custom, name="Use !help or ping me!"))
 client.remove_command("help")
+
+# List of random messages for the !stop command
+STOP_MESSAGES = [
+    "Conversation ended. What's next?",
+    "Stopping current dialogue....",
+    "Affirmative. Previous context has been stopped.",
+    "Chat session reset. How can I assist you now?",
+    "Dialogue concluded. Ready for new instructions.",
+    "OK, I was gagged by that.",
+]
 
 # --- Bot Events ---
 @client.event
@@ -164,6 +186,33 @@ async def on_message(message: discord.Message):
         embed.add_field(name="Have issues? Send them here! (Or in #help-en)", value="https://github.com/stakira/OpenUtau/issues", inline=False)
         await message.channel.send(embed=embed)
     await client.process_commands(message)
+
+@client.command(name='stop')
+async def stop_ai_chat(ctx: commands.Context):
+    """
+    Stops the current AI conversation
+    Only accessible by moderators.
+    Usage: !stop
+    """
+    error_message_lifetime = 15
+
+    if ctx.author.id not in config["moderators"]:
+        msg = await ctx.send("You do not have permission to stop the AI chat.")
+        await asyncio.sleep(error_message_lifetime)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
+
+    channel_id = str(ctx.channel.id)
+
+    if channel_id in channel_based_message_history:
+        # Select a random message from the predefined list
+        response_message = random.choice(STOP_MESSAGES)
+        await ctx.send(response_message)
+        print(f"AI chat for channel {channel_id} stopped by {ctx.author.name}.")
+    else:
+        await ctx.send("There is no active AI conversation in this channel to stop.")
+        print(f"Attempted to stop AI chat in {channel_id}, but no active history found.")
 
 # --- Utility Functions ---
 def split_list(input_list, page_size):
@@ -810,5 +859,359 @@ async def bot_commands(ctx: commands.Context, page: int = 1):
         except Exception as e:
             print(f"An unexpected error occurred during bot management command pagination: {e}")
             break
+
+# --- NEW COMMANDS: Sticky Notes ---
+
+@client.command(name='make_stickynote')
+async def make_stickynote(ctx: commands.Context, name: str):
+    """
+    Creates a sticky note from a replied message.
+    Requires moderator permissions.
+    Usage: !make_stickynote <note_name> (reply to a message)
+    """
+    error_message_lifetime = 30
+    media_dir = "stickynote_media" # Directory to save media files
+
+    if ctx.author.id not in config["moderators"]:
+        msg = await ctx.send("You do not have permission to use this command.")
+        await asyncio.sleep(error_message_lifetime)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
+
+    if not ctx.message.reference or not ctx.message.reference.message_id:
+        msg = await ctx.send("You must reply to a message to make it a sticky note.")
+        await asyncio.sleep(error_message_lifetime)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
+
+    try:
+        replied_message = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+    except discord.NotFound:
+        msg = await ctx.send("The message you replied to could not be found.")
+        await asyncio.sleep(error_message_lifetime)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
+    except discord.HTTPException as e:
+        msg = await ctx.send(f"An error occurred while fetching the replied message: `{e}`")
+        await asyncio.sleep(error_message_lifetime)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
+
+    if name in config["stickynotes"]:
+        msg = await ctx.send(f"A sticky note with the name `{name}` already exists. Please choose a different name or remove the existing one.")
+        await asyncio.sleep(error_message_lifetime)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
+
+    # Store the sticky note data
+    note_data = {
+        "content": replied_message.content,
+        "author_id": replied_message.author.id,
+        "author_name": replied_message.author.display_name,
+        "channel_id": replied_message.channel.id,
+        "message_id": replied_message.id,
+        "timestamp": replied_message.created_at.isoformat(),
+        "media_url": None, # Will store URL if media is detected and saved
+        "media_type": None # "image", "audio", "video"
+    }
+
+    # Handle attachments from the replied message
+    if replied_message.attachments:
+        attachment = replied_message.attachments[0] # Only take the first attachment for now
+        file_extension = os.path.splitext(attachment.filename)[1].lower()
+        
+        # Check for image types
+        if attachment.content_type.startswith('image/'):
+            media_type = "image"
+        # Check for audio types
+        elif attachment.content_type.startswith('audio/'):
+            media_type = "audio"
+        # Check for video types
+        elif attachment.content_type.startswith('video/'):
+            media_type = "video"
+        else:
+            media_type = None # Unsupported media type
+
+        if media_type:
+            os.makedirs(media_dir, exist_ok=True)
+            # Create a unique filename using UUID to prevent conflicts
+            unique_filename = f"{uuid.uuid4()}{file_extension}"
+            media_path = os.path.join(media_dir, unique_filename)
+            
+            try:
+                await attachment.save(media_path)
+                note_data["media_url"] = media_path # Store local path
+                note_data["media_type"] = media_type
+                print(f"Saved sticky note media to: {media_path}")
+            except Exception as e:
+                print(f"Error saving sticky note media {attachment.filename}: {e}")
+                note_data["media_url"] = None # Reset if save failed
+                note_data["media_type"] = None
+                await ctx.send(f"Warning: Could not save the attached media for sticky note `{name}`. It will be text-only.")
+
+    config["stickynotes"][name] = note_data
+
+    with open("config.json", "w") as f:
+        json.dump(config, f, indent=4)
+
+    embed = discord.Embed(
+        title=f"Sticky Note '{name}' Created",
+        description=f"Saved message from {replied_message.author.display_name}:\n>>> {replied_message.content[:500]}{'...' if len(replied_message.content) > 500 else ''}",
+        color=discord.Color.gold()
+    )
+    embed.add_field(name="Original Message Link", value=f"[Go to message]({replied_message.jump_url})", inline=False)
+    if note_data["media_url"] and note_data["media_type"] == "image":
+        embed.set_image(url=f"attachment://{os.path.basename(note_data['media_url'])}") # Use attachment for local file
+    
+    # Send the embed and any attached media file
+    files_to_send = []
+    if note_data["media_url"] and note_data["media_type"] == "image":
+        files_to_send.append(discord.File(note_data["media_url"], filename=os.path.basename(note_data["media_url"])))
+
+    await ctx.send(embed=embed, files=files_to_send if files_to_send else None)
+
+
+@client.command(name='list_stickynote')
+async def list_stickynote(ctx: commands.Context, *, page_or_filter: str = None):
+    """
+    Lists all saved sticky notes.
+    Requires moderator permissions.
+    Usage: !list_stickynote [page_number|search_query]
+    """
+    error_message_lifetime = 30
+
+    if ctx.author.id not in config["moderators"]:
+        msg = await ctx.send("You do not have permission to use this command.")
+        await asyncio.sleep(error_message_lifetime)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
+
+    all_stickynote_names = sorted(list(config["stickynotes"].keys()))
+    COMMANDS_PER_PAGE = 10
+
+    if page_or_filter and not page_or_filter.isdigit():
+        search_query = page_or_filter.lower()
+        commands_to_display_base = [name for name in all_stickynote_names if search_query in name.lower()]
+        embed_title_prefix = f"Sticky Notes matching '{search_query}'"
+        no_results_message = f"No sticky notes matching '{search_query}' were found."
+        initial_page_index = 0
+        embed_color = discord.Color.purple()
+    else:
+        commands_to_display_base = all_stickynote_names
+        embed_title_prefix = "All Sticky Notes"
+        no_results_message = "It seems there are no sticky notes saved yet."
+        embed_color = discord.Color.gold()
+        initial_page_index = 0
+
+        if page_or_filter and page_or_filter.isdigit():
+            try:
+                requested_page = int(page_or_filter) - 1
+                initial_page_index = requested_page
+            except ValueError:
+                pass
+
+    if not commands_to_display_base:
+        embed = discord.Embed(
+            title="No Sticky Notes Available" if not page_or_filter else "No Sticky Notes Found",
+            description=no_results_message,
+            color=discord.Color.red()
+        )
+        embed.set_footer(text="This message will disappear in 60 seconds.")
+        msg = await ctx.send(embed=embed)
+        await asyncio.sleep(60)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
+
+    command_pages, num_pages = split_list(commands_to_display_base, COMMANDS_PER_PAGE)
+
+    current_page = initial_page_index
+    if not (0 <= current_page < num_pages):
+        current_page = 0
+        embed_title_prefix = "Invalid Page Number"
+        no_results_message = f"Page number must be between 1 and {num_pages}. Showing page 1 instead."
+        embed_color = discord.Color.red()
+
+
+    def create_stickynote_embed(page_idx, total_pages_count, current_names_list, initial_color, title_prefix, no_results_msg):
+        if not current_names_list or not (0 <= page_idx < len(current_names_list)):
+            return discord.Embed(
+                title="Error Displaying Sticky Notes",
+                description="Could not find sticky notes for this page.",
+                color=discord.Color.red()
+            )
+
+        names_on_page = current_names_list[page_idx]
+        
+        description_lines = []
+        if title_prefix == "Invalid Page Number":
+            description_lines.append(no_results_msg)
+            description_lines.append("\n")
+
+        for name in names_on_page:
+            note_data = config["stickynotes"].get(name)
+            if note_data:
+                content_snippet = note_data['content'][:100] + '...' if len(note_data['content']) > 100 else note_data['content']
+                jump_url = f"https://discord.com/channels/{ctx.guild.id}/{note_data['channel_id']}/{note_data['message_id']}"
+                media_info = ""
+                if note_data.get("media_type"):
+                    media_info = f" ({note_data['media_type'].capitalize()} attached)"
+                
+                description_lines.append(f"**`{name}`** (from {note_data['author_name']}){media_info}: {content_snippet}")
+                description_lines.append(f"[Link]({jump_url})")
+            else:
+                description_lines.append(f"**`{name}`** (Note data missing)")
+        
+        embed = discord.Embed(
+            title=title_prefix,
+            description="\n".join(description_lines),
+            color=initial_color
+        )
+        embed.set_footer(text=f"Page {page_idx + 1}/{total_pages_count} | React to navigate. This message will expire in 60 seconds.")
+        return embed
+
+    message = await ctx.send(embed=create_stickynote_embed(current_page, num_pages, command_pages, embed_color, embed_title_prefix, no_results_message))
+
+    if num_pages > 1:
+        await message.add_reaction("◀️")
+        await message.add_reaction("▶️")
+        await message.add_reaction("❌")
+    else:
+        await message.add_reaction("❌")
+
+    def check_reaction(reaction, user):
+        return (user == ctx.author and
+                str(reaction.emoji) in ["◀️", "▶️", "❌"] and
+                reaction.message.id == message.id)
+
+    while True:
+        try:
+            reaction, user = await client.wait_for("reaction_add", timeout=60.0, check=check_reaction)
+
+            try:
+                await message.remove_reaction(reaction, user)
+            except discord.HTTPException:
+                print(f"Could not remove reaction: {reaction.emoji} by {user.name}. Check bot permissions.")
+
+            if str(reaction.emoji) == "▶️":
+                current_page = (current_page + 1) % num_pages
+            elif str(reaction.emoji) == "◀️":
+                current_page = (current_page - 1 + num_pages) % num_pages
+            elif str(reaction.emoji) == "❌":
+                await message.delete()
+                print("Sticky note interaction closed by user.")
+                return
+
+            await message.edit(embed=create_stickynote_embed(current_page, num_pages, command_pages, embed_color, embed_title_prefix, no_results_message))
+
+        except asyncio.TimeoutError:
+            print("Sticky note pagination timed out.")
+            try:
+                await message.clear_reactions()
+                expired_embed = create_stickynote_embed(current_page, num_pages, command_pages, embed_color, embed_title_prefix, no_results_message)
+                expired_embed.set_footer(text="This command navigation has expired.")
+                expired_embed.color = discord.Color.greyple()
+                await message.edit(embed=expired_embed)
+            except discord.HTTPException:
+                print("Could not clear reactions. Check bot permissions.")
+            break
+        except Exception as e:
+            print(f"An unexpected error occurred during sticky note pagination: {e}")
+            break
+
+@client.command(name='remove_stickynote')
+async def remove_stickynote(ctx: commands.Context, name: str):
+    """
+    Removes a sticky note by its name.
+    Requires moderator permissions.
+    Usage: !remove_stickynote <note_name>
+    """
+    error_message_lifetime = 30
+    media_dir = "stickynote_media"
+
+    if ctx.author.id not in config["moderators"]:
+        msg = await ctx.send("You do not have permission to use this command.")
+        await asyncio.sleep(error_message_lifetime)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
+
+    if name not in config["stickynotes"]:
+        msg = await ctx.send(f"Sticky note `{name}` does not exist.")
+        await asyncio.sleep(error_message_lifetime)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
+
+    # Delete associated media file if it exists
+    note_data = config["stickynotes"][name]
+    if note_data.get("media_url") and os.path.exists(note_data["media_url"]):
+        try:
+            os.remove(note_data["media_url"])
+            print(f"Removed sticky note media file: {note_data['media_url']}")
+        except OSError as e:
+            print(f"Error removing sticky note media file {note_data['media_url']}: {e}")
+
+    del config["stickynotes"][name]
+
+    with open("config.json", "w") as f:
+        json.dump(config, f, indent=4)
+
+    await ctx.send(f"Sticky note `{name}` has been successfully removed.")
+
+# --- NEW COMMAND: !stickynote ---
+@client.command(name='stickynote')
+async def stickynote(ctx: commands.Context, name: str):
+    """
+    Retrieves and displays a saved sticky note by its name.
+    Usage: !stickynote <note_name>
+    """
+    error_message_lifetime = 30
+
+    note_data = config["stickynotes"].get(name)
+
+    if not note_data:
+        msg = await ctx.send(f"Sticky note `{name}` not found. Use `!list_stickynote` to see available notes.")
+        await asyncio.sleep(error_message_lifetime)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
+
+    jump_url = f"https://discord.com/channels/{ctx.guild.id}/{note_data['channel_id']}/{note_data['message_id']}"
+
+    embed = discord.Embed(
+        title=f"Sticky Note: '{name}'",
+        description=note_data['content'],
+        color=discord.Color.gold()
+    )
+    embed.add_field(name="Original Author:", value=note_data['author_name'], inline=True)
+    embed.add_field(name="Date:", value=f"<t:{int(datetime.fromisoformat(note_data['timestamp']).timestamp())}:F>", inline=True)
+    embed.add_field(name="Original Message Link:", value=f"[Click to jump]({jump_url})", inline=False) # Direct link
+
+    files_to_send = []
+    if note_data.get("media_url") and os.path.exists(note_data["media_url"]):
+        file_path = note_data["media_url"]
+        file_type = note_data.get("media_type")
+
+        # For images, set as embed image and attach file
+        if file_type == "image":
+            filename = os.path.basename(file_path)
+            embed.set_image(url=f"attachment://{filename}")
+            files_to_send.append(discord.File(file_path, filename=filename))
+        # For audio/video, attach the file and mention it in a field
+        elif file_type in ["audio", "video"]:
+            filename = os.path.basename(file_path)
+            files_to_send.append(discord.File(file_path, filename=filename))
+            embed.add_field(name="Attached Media", value=f"Contains an attached {file_type} file: `{filename}`", inline=False)
+    elif note_data.get("media_url") and not os.path.exists(note_data["media_url"]):
+        embed.set_footer(text="Note: Associated media file not found on server.")
+
+    await ctx.send(embed=embed, files=files_to_send if files_to_send else None)
 
 client.run(token)
