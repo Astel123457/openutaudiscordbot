@@ -148,6 +148,7 @@ async def on_message(message: discord.Message):
                 if stop_flag:
                     stop_flag = False
                     await main_message.edit(content=current_message_content + "-- (AI was Stopped by command)")
+                    channel_based_message_history[channel_id].append({"role": "assistant", "content": [{"type": "text", "text": full_output + "-- (AI was Stopped by command)"}]})
                     break
                 time_delta = last_sent - time.time()
                 if abs(time_delta) < 0.9:
