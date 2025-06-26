@@ -110,7 +110,7 @@ async def on_message(message: discord.Message):
             async for chunk in response:
                 if chunk.data.choices[0].delta.content:
                     full_output += chunk.data.choices[0].delta.content
-                    if len(full_output) + 3 > 2000:
+                    if len(current_message_content) + 3 > 2000:
                         current_message_content = chunk.data.choices[0].delta.content
                         main_message = await message.channel.send("...")
                     else:
