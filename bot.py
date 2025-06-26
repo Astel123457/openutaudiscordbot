@@ -35,6 +35,8 @@ if "stickynotes" not in config:
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
 
+# Stop flag for AI Chatbot
+stop_flag = False
 command_list = []
 channel_based_message_history = {}
 # made it into a global constant
@@ -92,6 +94,7 @@ async def get_message_history(channel, limit=10):
 
 @client.event
 async def on_message(message: discord.Message):
+    global stop_flag
     if message.author == client.user:
         return
     
@@ -142,6 +145,10 @@ async def on_message(message: discord.Message):
                     # Append the full output to the channel's history
                     channel_based_message_history[channel_id].append({"role": "assistant", "content": [{"type": "text", "text": full_output}]})
                     break
+                if stop_flag:
+                    stop_flag = False
+                    await main_message.edit(content=current_message_content + "-- (AI was Stopped by command)")
+                    break
                 time_delta = last_sent - time.time()
                 if abs(time_delta) < 0.9:
                     continue #restart the loop if it's not been about .9 seconds since the last message was sent/edited, to avoid rate limiting
@@ -187,27 +194,22 @@ async def on_message(message: discord.Message):
         await message.channel.send(embed=embed)
     await client.process_commands(message)
 
-@client.command(name='stop')
-async def stop_ai_chat(ctx: commands.Context):
+@client.command()
+async def stop(ctx: commands.Context):
     """
     Stops the current AI conversation
     Only accessible by moderators.
     Usage: !stop
     """
+    global stop_flag
     error_message_lifetime = 15
-
-    if ctx.author.id not in config["moderators"]:
-        msg = await ctx.send("You do not have permission to stop the AI chat.")
-        await asyncio.sleep(error_message_lifetime)
-        try: await msg.delete()
-        except discord.NotFound: pass
-        return
 
     channel_id = str(ctx.channel.id)
 
     if channel_id in channel_based_message_history:
         # Select a random message from the predefined list
         response_message = random.choice(STOP_MESSAGES)
+        stop_flag = True
         await ctx.send(response_message)
         print(f"AI chat for channel {channel_id} stopped by {ctx.author.name}.")
     else:
