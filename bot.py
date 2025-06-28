@@ -121,6 +121,7 @@ async def on_message(message: discord.Message):
         channel_based_message_history[channel_id].append(mess)
         full_output = "" # we use this to store the full output from the model, then we'll append this to the channel history
         current_message_content = "" #we will erase the content in this if the output is too long
+        stop_flag = False # Clear the stop flag on new response
         async with message.channel.typing():
             main_message = await message.channel.send("...")
             response = await mistral_client.chat.stream_async(
