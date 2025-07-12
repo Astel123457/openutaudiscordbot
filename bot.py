@@ -607,7 +607,7 @@ async def bot_config(ctx: discord.Interaction):
         else:
             await send_temp_error(ctx, "The config file does not exist.", error_message_lifetime)
 
-@client.tree.command(name='list-commands', description='Lists all user-defined custom commands.')
+@client.tree.command(name='list_commands', description='Lists all user-defined custom commands.')
 @app_commands.describe(
     page_or_filter="Page number or search query (optional)",
     ephemeral="If true, only you can see the command output (other users cannot see or interact with it). Default: true."
