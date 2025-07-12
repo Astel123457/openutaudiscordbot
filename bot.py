@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from discord import ui, Interaction, Embed, Color
 from discord import app_commands
 import asyncio
 from difflib import get_close_matches
@@ -607,6 +608,53 @@ async def bot_config(ctx: discord.Interaction):
         else:
             await send_temp_error(ctx, "The config file does not exist.", error_message_lifetime)
 
+class CommandPaginator(ui.View):
+    def __init__(self, interaction: Interaction, command_pages, embed_color, embed_title_prefix, no_results_message, ephemeral: bool):
+        super().__init__(timeout=60)
+        self.interaction = interaction
+        self.command_pages = command_pages
+        self.total_pages = len(command_pages)
+        self.current_page = 0
+        self.embed_color = embed_color
+        self.embed_title_prefix = embed_title_prefix
+        self.no_results_message = no_results_message
+        self.ephemeral = ephemeral
+
+    def create_embed(self):
+        commands_on_page = self.command_pages[self.current_page]
+        commands_str = "\n".join(commands_on_page)
+
+        title = self.embed_title_prefix or "Available Commands"
+        description = (
+            self.no_results_message
+            if not commands_on_page
+            else f"Here are the commands you can use:\n\n{commands_str}"
+        )
+
+        embed = Embed(title=title, description=description, color=self.embed_color)
+        embed.set_footer(text=f"Page {self.current_page + 1}/{self.total_pages}")
+        return embed
+
+    @ui.button(label="◀️ Prev", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: Interaction, button: ui.Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+            await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+    @ui.button(label="▶️ Next", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: Interaction, button: ui.Button):
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+            await interaction.response.edit_message(embed=self.create_embed(), view=self)
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        try:
+            await self.interaction.edit_original_response(view=self)
+        except Exception:
+            pass  # In case interaction is already gone
+
 @client.tree.command(name='list-commands', description='Lists all user-defined custom commands.')
 @app_commands.describe(
     page_or_filter="Page number or search query (optional)",
@@ -618,85 +666,46 @@ async def list_commands(
     page_or_filter: str = None,
     ephemeral: bool = True
 ):
-    """
-    Lists all *user-defined* custom commands, paginated, with interactive navigation.
-    You can also search for a specific command.
-    Usage: /list_commands [page_number|command_name] [ephemeral]
-    If ephemeral is true, only you can see the command output (other users cannot see or interact with it).
-    """
     await interaction.response.defer(ephemeral=ephemeral)
     update_command_list()
 
     COMMANDS_PER_PAGE = 10
 
-    # Determine if the argument is a search or a page number
+    # Determine if it's a search or a page number
     if page_or_filter and not page_or_filter.isdigit():
         search_query = page_or_filter
         commands_to_display_base = autocorrect_command(search_query)
         embed_title_prefix = f"User-Defined Commands matching '{search_query}'"
         no_results_message = f"No user-defined commands matching '{search_query}' were found."
-        initial_page_index = 0
-        embed_color = discord.Color.blue()
+        embed_color = Color.blue()
     else:
         commands_to_display_base = command_list
         embed_title_prefix = "Available Commands"
         no_results_message = "It seems there are no user-defined commands to display yet."
-        embed_color = discord.Color.green()
-        initial_page_index = 0
-
-        if page_or_filter and page_or_filter.isdigit():
-            try:
-                requested_page = int(page_or_filter) - 1
-                initial_page_index = requested_page
-            except ValueError:
-                pass
+        embed_color = Color.green()
 
     if not commands_to_display_base:
-        embed = discord.Embed(
+        embed = Embed(
             title="No User-Defined Commands Available" if not page_or_filter else "No Commands Found",
             description=no_results_message,
-            color=discord.Color.red()
+            color=Color.red()
         )
         embed.set_footer(text="This message will disappear in 60 seconds.")
         await interaction.followup.send(embed=embed, ephemeral=ephemeral)
         return
 
-    command_pages, num_pages = split_list(commands_to_display_base, COMMANDS_PER_PAGE)
+    command_pages, _ = split_list(commands_to_display_base, COMMANDS_PER_PAGE)
 
-    current_page = initial_page_index
-    if not (0 <= current_page < num_pages):
-        current_page = 0
-        embed_title_prefix = "Invalid Page Number"
-        no_results_message = f"Page number must be between 1 and {num_pages}. Showing page 1 instead."
-        embed_color = discord.Color.red()
+    view = CommandPaginator(
+        interaction=interaction,
+        command_pages=command_pages,
+        embed_color=embed_color,
+        embed_title_prefix=embed_title_prefix,
+        no_results_message=no_results_message,
+        ephemeral=ephemeral
+    )
 
-    def create_commands_embed(page_idx, total_pages_count, current_list, initial_color):
-        if not current_list or not (0 <= page_idx < len(current_list)):
-            return discord.Embed(
-                title="Error Displaying Commands",
-                description="Could not find commands for this page.",
-                color=discord.Color.red()
-            )
-
-        commands_on_page = current_list[page_idx]
-        commands_str = "\n".join(commands_on_page)
-
-        title = embed_title_prefix if embed_title_prefix else "Available Commands"
-        if no_results_message and not commands_on_page:
-            description = no_results_message
-        else:
-            description = f"Here are the commands you can use:\n\n{commands_str}"
-
-        embed = discord.Embed(
-            title=title,
-            description=description,
-            color=initial_color
-        )
-        embed.set_footer(text=f"Page {page_idx + 1}/{total_pages_count} | Use /list_commands page_number to navigate pages.")
-        return embed
-
-    embed = create_commands_embed(current_page, num_pages, command_pages, embed_color)
-    await interaction.followup.send(embed=embed, ephemeral=ephemeral)
+    await interaction.followup.send(embed=view.create_embed(), view=view, ephemeral=ephemeral)
     
 # --- Import Config Command ---
 @client.command(name='import_config')
