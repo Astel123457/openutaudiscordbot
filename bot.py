@@ -377,7 +377,7 @@ async def edit(ctx: commands.Context, *, new_content: str):
 
     await ctx.send("No recent AI message found to edit.")
 
-@client.tree.command(name='set_info', description='Sets the informational text for a custom command.')
+@client.tree.command(name='set-info', description='Sets the informational text for a custom command.')
 async def set_info(ctx: discord.Interaction, command: str, info: str):
     """
     Sets the informational text for a custom command.
@@ -401,8 +401,13 @@ async def set_info(ctx: discord.Interaction, command: str, info: str):
     update_command_list()
     await ctx.send(f"The info for the command `{command}` has been set successfully!")
 
-@client.tree.command(name='make_command', description='Creates a new custom command.')
-async def make_command(ctx: discord.Interaction, command: str, info: str = None, image: discord.Attachment = None):
+@client.tree.command(name='make-command', description='Creates a new custom command.')
+@app_commands.describe(
+    command="The name of the command to create",
+    info="Optional informational text for the command (if not provided, an image must be attached)",
+    attachment="Optional image attachment for the command (if not provided, info must be given)"
+)
+async def make_command(ctx: discord.Interaction, command: str, info: str = None, attachment: discord.Attachment = None):
     """
     Creates a new custom command.
     Requires moderator permissions.
@@ -522,8 +527,12 @@ async def moderators(ctx: commands.Context):
         )
         await ctx.send(embed=embed)
 
-@client.tree.command(name='rename_command', description='Renames an existing custom command.')
-@app_commands.rename(old_name="old command", new_name="new command")
+@client.tree.command(name='rename-command', description='Renames an existing custom command.')
+@app_commands.rename(old_name="old-command", new_name="new-command")
+@app_commands.describe(
+    old_name="The current name of the command to rename",
+    new_name="The new name for the command"
+)
 async def rename_command(ctx: commands.Context, old_name: str, new_name: str): 
     """
     Renames an existing custom command.
@@ -598,14 +607,12 @@ async def bot_config(ctx: discord.Interaction):
         else:
             await send_temp_error(ctx, "The config file does not exist.", error_message_lifetime)
 
-@client.tree.command(name='list_commands', description='Lists all user-defined custom commands, paginated, with interactive navigation. You can also search for a specific command.')
-@app_commands.describe(page_or_filter="Page number or search query (optional)")
-@app_commands.rename(page_or_filter="page or filter")
+@client.tree.command(name='list-commands', description='Lists all user-defined custom commands, paginated, with interactive navigation. You can also search for a specific command.')
 @app_commands.describe(
     page_or_filter="Page number or search query (optional)",
     ephemeral="If true, only you can see the command output (other users cannot see or interact with it). Default: true."
 )
-@app_commands.rename(page_or_filter="page or filter")
+@app_commands.rename(page_or_filter="page-or-filter")
 async def list_commands(
     interaction: discord.Interaction,
     page_or_filter: str = None,
