@@ -624,7 +624,6 @@ async def list_commands(
     Usage: /list_commands [page_number|command_name] [ephemeral]
     If ephemeral is true, only you can see the command output (other users cannot see or interact with it).
     """
-    await interaction.response.defer(ephemeral=False)
     update_command_list()
 
     COMMANDS_PER_PAGE = 10
