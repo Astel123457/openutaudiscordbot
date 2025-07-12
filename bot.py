@@ -624,6 +624,7 @@ async def list_commands(
     Usage: /list_commands [page_number|command_name] [ephemeral]
     If ephemeral is true, only you can see the command output (other users cannot see or interact with it).
     """
+    print(f"Interaction user: {interaction.user.name}")
     await interaction.response.defer(ephemeral=ephemeral)
     update_command_list()
 
