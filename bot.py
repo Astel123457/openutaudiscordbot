@@ -436,7 +436,7 @@ async def make_command(ctx: discord.Interaction, command: str, info: str = None,
         image_filename = command + ".png"
         image_path = os.path.join("images", image_filename)
         os.makedirs(os.path.dirname(image_path), exist_ok=True)
-        await ctx.message.attachments[0].save(image_path)
+        await attachment.save(image_path)
         config[command]["image"] = image_path
 
     with open("config.json", "w") as f:
