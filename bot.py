@@ -391,7 +391,7 @@ async def set_info(ctx: discord.Interaction, command: str, info: str):
 
     conf = config.get(command, None)
     if conf is None:
-        await ctx.response.send_message(f"The command `{command}` does not exist. Use `!make_command` to create it first.")
+        await ctx.response.send_message(f"The command `{command}` does not exist. Use `/make_command` to create it first.")
         return
 
     conf["info"] = info
@@ -421,8 +421,11 @@ async def make_command(ctx: discord.Interaction, command: str, info: str = None,
     if command in config:
         await ctx.response.send_message(f"The command `{command}` already exists.")
         return
+    #why did i have to code it this way.
+    if attachment:
+        has_image = True
+    else: has_image = False
 
-    has_image = len(ctx.message.attachments) > 0
     if not has_image and not info:
         await ctx.response.send_message("You must provide either an info message, an image, or both.")
         return
