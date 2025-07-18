@@ -236,6 +236,7 @@ async def sync(ctx: commands.Context):
     """
     Syncs the bot's command list with the Discord server.
     """
+    print(f"Syncing commands for guild: {ctx.guild.name} (ID: {ctx.guild.id})")
     del1 = await ctx.send("Syncing commands...")
     await client.tree.sync(ctx.guild.id)
     del2 = await ctx.send("Commands synced successfully!")
