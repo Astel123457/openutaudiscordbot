@@ -236,9 +236,9 @@ async def sync(ctx: commands.Context):
     """
     Syncs the bot's command list with the Discord server.
     """
-    print(f"Syncing commands for guild: {ctx.guild.name} (ID: {ctx.guild.id})")
+    
     del1 = await ctx.send("Syncing commands...")
-    await client.tree.sync(ctx.guild.id)
+    await client.tree.sync(int(ctx.guild.id))  # Sync commands for the specific guild
     del2 = await ctx.send("Commands synced successfully!")
     await asyncio.sleep(5)  # Wait for a few seconds before deleting the message
     await del1.delete()
