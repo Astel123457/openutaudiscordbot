@@ -238,7 +238,7 @@ async def sync(ctx: commands.Context):
     """
     
     del1 = await ctx.send("Syncing commands...")
-    await client.tree.sync(guild=ctx.guild.id)  # Sync commands for the specific guild
+    await client.tree.sync(guild=ctx.guild)  # Sync commands for the specific guild
     del2 = await ctx.send("Commands synced successfully!")
     await asyncio.sleep(5)  # Wait for a few seconds before deleting the message
     await del1.delete()
