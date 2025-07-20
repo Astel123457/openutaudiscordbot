@@ -1,12 +1,22 @@
-from discord import app_commands, Locale
+from __future__ import annotations
 
+import discord
+from discord import app_commands
 
-class BotTranslator(app_commands.Translator):
-    
-    async def translate(self, string: app_commands.locale_str, locale: Locale, context: app_commands.TranslationContext):
-        print(string, locale, context)  # Debugging output to check the parameters
-        if context.location == "make-command":  # check command name
-            if locale is Locale.japanese:  # check locale
-                print("translated")
-                return "コマンドを作成する"  # return translated string
+class MyTranslator(app_commands.Translator):
+    async def translate(
+        self,
+        string: app_commands.locale_str,
+        locale: discord.Locale,
+        context: app_commands.TranslationContext,
+    ) -> str | None:
+        # For this example, we can translate a few words in Japanese...
+        message = str(string)
+        if locale is discord.Locale.japanese:
+            if message == 'Hello!':
+                return 'こんにちは！'
+            elif message == 'Goodbye!':
+                return 'さようなら！'
+
+        # Otherwise we don't handle it
         return None
