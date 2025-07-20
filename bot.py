@@ -10,6 +10,7 @@ from mistralai import Mistral
 import secretsd as sec #TODO: switch to using environment variables or a more secure method for storing sensitive information
 import time
 from datetime import datetime
+from translations import BotTranslator  # Import the custom translator class
 from textwrap import wrap
 import random
 import uuid
@@ -1054,5 +1055,7 @@ async def stickynote(ctx: commands.Context, name: str):
         embed.set_footer(text="Note: Associated media file not found on server.")
 
     await ctx.send(embed=embed, files=files_to_send if files_to_send else None)
-
+async def setup_hook():
+    await client.tree.set_translator(BotTranslator())
+client.setup_hook = setup_hook
 client.run(token)
