@@ -9,5 +9,6 @@ class BotTranslator(app_commands.Translator):
         
         if context.name == "make-command":  # check command name
             if locale is Locale.japanese:  # check locale
+                print("translated")
                 return "コマンドを作成する"  # return translated string
         return None
