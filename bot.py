@@ -524,7 +524,7 @@ async def moderators(ctx: discord.Interaction):
             description=moderators_str,
             color=discord.Color.blue()
         )
-        await ctx.followup.send(embed=embed)
+        await ctx.response.send_message(embed=embed)
 
 @client.tree.command(name='rename-command', description='Renames an existing custom command.')
 @app_commands.rename(old_name="old-command", new_name="new-command")
