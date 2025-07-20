@@ -399,7 +399,7 @@ async def set_info(ctx: discord.Interaction, command: str, info: str):
     update_command_list()
     await ctx.send(f"The info for the command `{command}` has been set successfully!")
 
-@client.tree.command(name='make-command', description='Creates a new custom command.')
+@client.tree.command(name=app_commands.locale_str('make-command'), description='Creates a new custom command.')
 @app_commands.describe(
     command="The name of the command to create",
     info="Optional informational text for the command (if not provided, an image must be attached)",
