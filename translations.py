@@ -11,6 +11,7 @@ class MyTranslator(app_commands.Translator):
         context: app_commands.TranslationContext,
     ) -> str | None:
         # For this example, we can translate a few words in Japanese...
+        print(f"Translating '{string}' for locale '{locale}'")
         message = str(string)
         if locale is discord.Locale.japanese:
             if message == 'Hello!':

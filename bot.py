@@ -10,7 +10,7 @@ from mistralai import Mistral
 import secretsd as sec #TODO: switch to using environment variables or a more secure method for storing sensitive information
 import time
 from datetime import datetime
-from translations import BotTranslator  # Import the custom translator class
+from translations import MyTranslator # Import the custom translator class
 from textwrap import wrap
 import random
 import uuid
@@ -1057,6 +1057,9 @@ async def stickynote(ctx: commands.Context, name: str):
     await ctx.send(embed=embed, files=files_to_send if files_to_send else None)
 async def setup_hook():
     print("setup hook called")
-    await client.tree.set_translator(BotTranslator())
+    await client.tree.sync()
+    await client.tree.set_translator(MyTranslator())
+
 client.setup_hook = setup_hook
+
 client.run(token)
