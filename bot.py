@@ -266,7 +266,7 @@ async def set_image(ctx: discord.Interaction, command: str, image: discord.Attac
     Usage: !set_image <command_name> (attach image)
     """
     if ctx.user.id not in config["moderators"]:
-        await ctx.followup.send("You do not have permission to use this command.")
+        await ctx.response.send_message("You do not have permission to use this command.")
         return
 
     conf = config.get(command, None)
@@ -276,18 +276,15 @@ async def set_image(ctx: discord.Interaction, command: str, image: discord.Attac
         conf = config.get(command, None)
 
     conf["has_image"] = True
-    if not ctx.message.attachments:
-        await ctx.send("You must provide an image. (Links are not supported at this time)")
-        return
 
-    image_path = await ctx.message.attachments[0].save(command + ".png")  # this is the image that is being sent
+    await image.save(command + ".png")  # this is the image that is being sent
     conf["image"] = command + ".png"  
 
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
 
     update_command_list() 
-    await ctx.send(f"The image for the command `{command}` has been set successfully!")
+    await ctx.response.send_message(f"The image for the command `{command}` has been set successfully!")
 
 @client.tree.command(name='clear', description='Clears the channel\'s message history for the AI chat.')
 async def clear(ctx: discord.Interaction):
@@ -298,9 +295,9 @@ async def clear(ctx: discord.Interaction):
     channel_id = str(ctx.channel.id)
     if channel_id in channel_based_message_history:
         channel_based_message_history[channel_id] = []
-        await ctx.followup.send("The message history for this channel has been cleared.")
+        await ctx.response.send_message("The message history for this channel has been cleared.")
     else:
-        await ctx.followup.send("No message history found for this channel.")
+        await ctx.response.send_message("No message history found for this channel.")
     return
 
 @client.tree.command(name='start-finetuning', description='Starts the finetuning process.')
@@ -312,7 +309,7 @@ async def start_finetuning(ctx: discord.Interaction):
         await ctx.followup.send("You do not have permission to use this command.")
         return
     await clear(ctx)  # Clear the message history before starting finetuning
-    await ctx.followup.send("Starting Finetuning.")
+    await ctx.response.send_message("Starting Finetuning.")
 
 @client.tree.command(name='end-finetuning', description='Ends the finetuning process.')
 async def end_finetuning(ctx: discord.Interaction):
@@ -334,9 +331,9 @@ async def end_finetuning(ctx: discord.Interaction):
     try:
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(history, f, indent=4, ensure_ascii=False)
-        await ctx.followup.send(f"Finetuning ended. Chat history saved to `{filename}`.")
+        await ctx.response.send_message(f"Finetuning ended. Chat history saved to `{filename}`.")
     except Exception as e:
-        await ctx.followup.send(f"Failed to save chat history: {e}")
+        await ctx.response.send_message(f"Failed to save chat history: {e}")
 
 @client.tree.command(name='edit', description='Edits the last message the AI sent in the current channel.')
 async def edit(ctx: discord.Interaction, *, new_content: str):
@@ -346,7 +343,7 @@ async def edit(ctx: discord.Interaction, *, new_content: str):
     """
     # Only allow moderators to use this command
     if ctx.user.id not in config.get("moderators", []):
-        await ctx.followup.send("You do not have permission to use this command.")
+        await ctx.response.send_message("You do not have permission to use this command.")
         return
 
     channel_id = str(ctx.channel.id)
@@ -475,7 +472,7 @@ async def remove_command(ctx: discord.Interaction, command: str):
         json.dump(config, f, indent=4)
 
     update_command_list()
-    await ctx.send(f"The command `{command}` has been removed successfully!")
+    await ctx.response.send_message(f"The command `{command}` has been removed successfully!")
 
 @client.tree.command(name='add-bot-moderator', description='Adds a user as a bot moderator.')
 @app_commands.describe(user="The user to add as a moderator")
@@ -541,16 +538,16 @@ async def rename_command(ctx: discord.Interaction, old_name: str, new_name: str)
     Requires moderator permissions.
     Usage: !rename_command <old_name> <new_name>
     """
-    if ctx.author.id not in config["moderators"]:
-        await ctx.send("You do not have permission to use this command.")
+    if ctx.user.id not in config["moderators"]:
+        await ctx.response.send_message("You do not have permission to use this command.")
         return
 
     if old_name not in config:
-        await ctx.send(f"The command `{old_name}` does not exist.")
+        await ctx.response.send_message(f"The command `{old_name}` does not exist.")
         return
 
     if new_name in config:
-        await ctx.send(f"The command `{new_name}` already exists.")
+        await ctx.response.send_message(f"The command `{new_name}` already exists.")
         return
 
     config[new_name] = config.pop(old_name)
@@ -577,7 +574,7 @@ async def rename_command(ctx: discord.Interaction, old_name: str, new_name: str)
         json.dump(config, f, indent=4)
 
     update_command_list()
-    await ctx.send(f"The command `{old_name}` has been renamed to `{new_name}` successfully!")
+    await ctx.response.send_message(f"The command `{old_name}` has been renamed to `{new_name}` successfully!")
 
 class CommandPaginator(ui.View):
     def __init__(self, interaction: Interaction, command_pages, embed_color, embed_title_prefix, no_results_message, ephemeral: bool):
