@@ -704,12 +704,13 @@ async def import_config(ctx: discord.Interaction, file: discord.Attachment):
 
 # --- NEW COMMANDS: Sticky Notes ---
 
-class StickyNote(discord.ui.Modal, title="Create Sticky Note", custom_id="create_sticky_note"):
+class StickyNote(discord.ui.Modal, title="Create Sticky Note", ):
     """
     Modal for creating a sticky note.
     """
     def __init__(self, message: discord.Message):
         self.message = message
+        self.custom_id = str(uuid.uuid4())  # Unique ID for the modal instance, idk why discord fucks this up but it does
     name = discord.ui.TextInput(label="Note Name", placeholder="Enter a name for the sticky note", required=True, max_length=100)
 
     async def on_submit(self, interaction: discord.Interaction):
