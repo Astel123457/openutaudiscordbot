@@ -704,114 +704,119 @@ async def import_config(ctx: discord.Interaction, file: discord.Attachment):
 
 # --- NEW COMMANDS: Sticky Notes ---
 
-class StickyNote(discord.ui.Modal, title="Create Sticky Note", ):
+@client.command(name='make_stickynote')
+async def make_stickynote(ctx: commands.Context, name: str):
     """
-    Modal for creating a sticky note.
+    Creates a sticky note from a replied message.
+    Requires moderator permissions.
+    Usage: !make_stickynote <note_name> (reply to a message)
     """
-    def __init__(self, message: discord.Message):
-        self.message = message
-        self.custom_id = str(uuid.uuid4())  # Unique ID for the modal instance, idk why discord fucks this up but it does
-    name = discord.ui.TextInput(label="Note Name", placeholder="Enter a name for the sticky note", required=True, max_length=100)
+    error_message_lifetime = 30
+    media_dir = "stickynote_media" # Directory to save media files
 
-    async def on_submit(self, interaction: discord.Interaction):
-        # This method will be called when the modal is submitted
-        name = self.name.value
-        message = self.message
-        media_dir = "stickynote_media" # Directory to save media files
+    if ctx.author.id not in config["moderators"]:
+        msg = await ctx.send("You do not have permission to use this command.")
+        await asyncio.sleep(error_message_lifetime)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
 
-        if interaction.user.id not in config["moderators"]:
-            msg = await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+    if not ctx.message.reference or not ctx.message.reference.message_id:
+        msg = await ctx.send("You must reply to a message to make it a sticky note.")
+        await asyncio.sleep(error_message_lifetime)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
 
+    try:
+        replied_message = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+    except discord.NotFound:
+        msg = await ctx.send("The message you replied to could not be found.")
+        await asyncio.sleep(error_message_lifetime)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
+    except discord.HTTPException as e:
+        msg = await ctx.send(f"An error occurred while fetching the replied message: `{e}`")
+        await asyncio.sleep(error_message_lifetime)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
 
-        try:
-            replied_message = await interaction.channel.fetch_message(message.reference.message_id)
-        except discord.NotFound:
-            msg = await interaction.response.send_message("The message you replied to could not be found.", ephemeral=True)
+    if name in config["stickynotes"]:
+        msg = await ctx.send(f"A sticky note with the name `{name}` already exists. Please choose a different name or remove the existing one.")
+        await asyncio.sleep(error_message_lifetime)
+        try: await msg.delete()
+        except discord.NotFound: pass
+        return
 
-        except discord.HTTPException as e:
-            msg = await interaction.response.send_message(f"An error occurred while fetching the replied message: `{e}`", ephemeral=True)
-            return
+    # Store the sticky note data
+    note_data = {
+        "content": replied_message.content,
+        "author_id": replied_message.author.id,
+        "author_name": replied_message.author.display_name,
+        "channel_id": replied_message.channel.id,
+        "message_id": replied_message.id,
+        "timestamp": replied_message.created_at.isoformat(),
+        "media_url": None, # Will store URL if media is detected and saved
+        "media_type": None # "image", "audio", "video"
+    }
 
-        if name in config["stickynotes"]:
-            msg = await interaction.response.send_message(f"A sticky note with the name `{name}` already exists. Please choose a different name or remove the existing one.", ephemeral=True)
-            return
+    # Handle attachments from the replied message
+    if replied_message.attachments:
+        attachment = replied_message.attachments[0] # Only take the first attachment for now
+        file_extension = os.path.splitext(attachment.filename)[1].lower()
+        
+        # Check for image types
+        if attachment.content_type.startswith('image/'):
+            media_type = "image"
+        # Check for audio types
+        elif attachment.content_type.startswith('audio/'):
+            media_type = "audio"
+        # Check for video types
+        elif attachment.content_type.startswith('video/'):
+            media_type = "video"
+        else:
+            media_type = None # Unsupported media type
 
-        # Store the sticky note data
-        note_data = {
-            "content": replied_message.content,
-            "author_id": replied_message.author.id,
-            "author_name": replied_message.author.display_name,
-            "channel_id": replied_message.channel.id,
-            "message_id": replied_message.id,
-            "timestamp": replied_message.created_at.isoformat(),
-            "media_url": None, # Will store URL if media is detected and saved
-            "media_type": None # "image", "audio", "video"
-        }
+        if media_type:
+            os.makedirs(media_dir, exist_ok=True)
+            # Create a unique filename using UUID to prevent conflicts
+            unique_filename = f"{uuid.uuid4()}{file_extension}"
+            media_path = os.path.join(media_dir, unique_filename)
+            
+            try:
+                await attachment.save(media_path)
+                note_data["media_url"] = media_path # Store local path
+                note_data["media_type"] = media_type
+                print(f"Saved sticky note media to: {media_path}")
+            except Exception as e:
+                print(f"Error saving sticky note media {attachment.filename}: {e}")
+                note_data["media_url"] = None # Reset if save failed
+                note_data["media_type"] = None
+                await ctx.send(f"Warning: Could not save the attached media for sticky note `{name}`. It will be text-only.")
 
-        # Handle attachments from the replied message
-        if replied_message.attachments:
-            attachment = replied_message.attachments[0] # Only take the first attachment for now
-            file_extension = os.path.splitext(attachment.filename)[1].lower()
+    config["stickynotes"][name] = note_data
 
-            # Check for image types
-            if attachment.content_type.startswith('image/'):
-                media_type = "image"
-            # Check for audio types
-            elif attachment.content_type.startswith('audio/'):
-                media_type = "audio"
-            # Check for video types
-            elif attachment.content_type.startswith('video/'):
-                media_type = "video"
-            else:
-                media_type = None # Unsupported media type
+    with open("config.json", "w") as f:
+        json.dump(config, f, indent=4)
 
-            if media_type:
-                os.makedirs(media_dir, exist_ok=True)
-                # Create a unique filename using UUID to prevent conflicts
-                unique_filename = f"{uuid.uuid4()}{file_extension}"
-                media_path = os.path.join(media_dir, unique_filename)
+    embed = discord.Embed(
+        title=f"Sticky Note '{name}' Created",
+        description=f"Saved message from {replied_message.author.display_name}:\n>>> {replied_message.content[:500]}{'...' if len(replied_message.content) > 500 else ''}",
+        color=discord.Color.gold()
+    )
+    embed.add_field(name="Original Message Link", value=f"[Go to message]({replied_message.jump_url})", inline=False)
+    if note_data["media_url"] and note_data["media_type"] == "image":
+        embed.set_image(url=f"attachment://{os.path.basename(note_data['media_url'])}") # Use attachment for local file
+    
+    # Send the embed and any attached media file
+    files_to_send = []
+    if note_data["media_url"] and note_data["media_type"] == "image":
+        files_to_send.append(discord.File(note_data["media_url"], filename=os.path.basename(note_data["media_url"])))
 
-                try:
-                    await attachment.save(media_path)
-                    note_data["media_url"] = media_path # Store local path
-                    note_data["media_type"] = media_type
-                    print(f"Saved sticky note media to: {media_path}")
-                except Exception as e:
-                    print(f"Error saving sticky note media {attachment.filename}: {e}")
-                    note_data["media_url"] = None # Reset if save failed
-                    note_data["media_type"] = None
-                    await interaction.response.send_message(f"Warning: Could not save the attached media for sticky note `{name}`. It will be text-only.", ephemeral=True)
+    await ctx.send(embed=embed, files=files_to_send if files_to_send else None)
 
-        config["stickynotes"][name] = note_data
-
-        with open("config.json", "w") as f:
-            json.dump(config, f, indent=4)
-
-        embed = discord.Embed(
-            title=f"Sticky Note '{name}' Created",
-            description=f"Saved message from {replied_message.author.display_name}:\n>>> {replied_message.content[:500]}{'...' if len(replied_message.content) > 500 else ''}",
-            color=discord.Color.gold()
-        )
-        embed.add_field(name="Original Message Link", value=f"[Go to message]({replied_message.jump_url})", inline=False)
-        if note_data["media_url"] and note_data["media_type"] == "image":
-            embed.set_image(url=f"attachment://{os.path.basename(note_data['media_url'])}") # Use attachment for local file
-
-        # Send the embed and any attached media file
-        files_to_send = []
-        if note_data["media_url"] and note_data["media_type"] == "image":
-            files_to_send.append(discord.File(note_data["media_url"], filename=os.path.basename(note_data["media_url"])))
-
-        await interaction.response.send_message(embed=embed, files=files_to_send if files_to_send else None)
-
-async def make_stickynote(ctx: discord.Interaction, message: discord.Message):
-    await ctx.response.send_modal(StickyNote(message))
-
-make_stickynote_cm = app_commands.ContextMenu(
-    name="Make Sticky Note",
-    callback=make_stickynote
-)
-
-client.tree.add_command(make_stickynote_cm) # This registers the context menu command, shows up upon right-clicking a message
 
 @client.command(name='list_stickynote')
 async def list_stickynote(ctx: commands.Context, *, page_or_filter: str = None):
