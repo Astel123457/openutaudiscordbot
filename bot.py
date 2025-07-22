@@ -212,7 +212,7 @@ def autocorrect_command(command_name):
     combined_matches = list(dict.fromkeys(substring_matches + close_matches))
     return combined_matches
 
-@client.tree.command(name=app_commands.locale_str("commands-stop"), description=app_commands.locale_str("commands.stop.description"))
+@client.tree.command(name="stop", description="commands.stop.description")
 async def stop(ctx: discord.Interaction):
     """
     Stops the current AI conversation
@@ -259,7 +259,7 @@ async def send_temp_error(ctx: discord.Interaction, message_content: str, error_
             pass
 
 # --- Bot Commands ---
-@client.tree.command(name='commands-set-image', description='commands.set-image.description')
+@client.tree.command(name='set-image', description='commands.set-image.description')
 async def set_image(ctx: discord.Interaction, command: str, image: discord.Attachment):
     """
     Sets an image for a custom command.
@@ -287,7 +287,7 @@ async def set_image(ctx: discord.Interaction, command: str, image: discord.Attac
     update_command_list() 
     await ctx.response.send_message(f"The image for the command `{command}` has been set successfully!")
 
-@client.tree.command(name='commands-clear', description='commands.clear.description')
+@client.tree.command(name='clear', description='commands.clear.description')
 async def clear(ctx: discord.Interaction):
     """
     Clears the channel's message history for the AI chat.
@@ -301,7 +301,7 @@ async def clear(ctx: discord.Interaction):
         await ctx.response.send_message("No message history found for this channel.")
     return
 
-@client.tree.command(name='start-finetuning', description='Starts the finetuning process.')
+@client.tree.command(name='start-finetuning', description='commands.start-finetuning.description')
 async def start_finetuning(ctx: discord.Interaction):
     """
     Starts the finetuning process.
@@ -312,7 +312,7 @@ async def start_finetuning(ctx: discord.Interaction):
     await clear(ctx)  # Clear the message history before starting finetuning
     await ctx.response.send_message("Starting Finetuning.")
 
-@client.tree.command(name='end-finetuning', description='Ends the finetuning process.')
+@client.tree.command(name='end-finetuning', description='commands.end-finetuning.description')
 async def end_finetuning(ctx: discord.Interaction):
     """
     Ends the finetuning process by saving the current channel's chat history to a uniquely named JSON file.
@@ -336,7 +336,8 @@ async def end_finetuning(ctx: discord.Interaction):
     except Exception as e:
         await ctx.response.send_message(f"Failed to save chat history: {e}")
 
-@client.tree.command(name='edit', description='Edits the last message the AI sent in the current channel.')
+@client.tree.command(name='edit', description='commands.edit.description')
+@app_commands.describe(new_content="commands.edit.new_content")
 async def edit(ctx: discord.Interaction, *, new_content: str):
     """
     Edits the last message the AI sent in the current channel and updates the channel_based_message_history.
@@ -376,7 +377,8 @@ async def edit(ctx: discord.Interaction, *, new_content: str):
 
     await ctx.followup.send("No recent AI message found to edit.")
 
-@client.tree.command(name='set-info', description='Sets the informational text for a custom command.')
+@client.tree.command(name='set-info', description='commands.set-info.description')
+@app_commands.describe(command="commands.make-command.command", info="commands.set-info.info")
 async def set_info(ctx: discord.Interaction, command: str, info: str):
     """
     Sets the informational text for a custom command.
@@ -400,11 +402,11 @@ async def set_info(ctx: discord.Interaction, command: str, info: str):
     update_command_list()
     await ctx.send(f"The info for the command `{command}` has been set successfully!")
 
-@client.tree.command(name=app_commands.locale_str('make-command'), description='Creates a new custom command.')
+@client.tree.command(name='make-command', description='commands.make-command.description')
 @app_commands.describe(
-    command="The name of the command to create",
-    info="Optional informational text for the command (if not provided, an image must be attached)",
-    attachment="Optional image attachment for the command (if not provided, info must be given)"
+    command="commands.make-command.command",
+    info="commands.make-command.info",
+    attachment="commands.make-command.attachment"
 )
 async def make_command(ctx: discord.Interaction, command: str, info: str = None, attachment: discord.Attachment = None):
     """
@@ -443,7 +445,8 @@ async def make_command(ctx: discord.Interaction, command: str, info: str = None,
     update_command_list()
     await ctx.response.send_message(f"The command `{command}` has been created successfully!")
 
-@client.tree.command(name='remove-command', description='Removes an existing custom command.')
+@client.tree.command(name='remove-command', description='commands.remove-command.description')
+@app_commands.describe(command="commands.remove-command.command")
 async def remove_command(ctx: discord.Interaction, command: str): 
     """
     Removes an existing custom command.
