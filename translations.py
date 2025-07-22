@@ -5,6 +5,7 @@ from discord import app_commands
 # this apperenlty doesn't work but we'll leave it for now, just in case things start working again
 
 en = {
+    "stop": "stop",
     "commands.stop.description": "Stops the AI conversation in the current channel.",
     "commands.set-image.description": "Sets an image for a custom command.",
     "commands.clear.description": "Clears the current channel's AI conversation.",
@@ -22,9 +23,22 @@ en = {
     "commands.remove-command.command": "The name of the command to remove",
 }
 ja = {
+    "stop": "停止",
     "commands.stop.description": "現在のチャンネルでAIの会話を停止します。",
     "commands.set-image.description": "カスタムコマンドの画像を設定します。",
     "commands.clear.description": "現在のチャンネルのAI会話をクリアします。",
+    "commands.end-finetuning.description": "現在のファインチューニングセッションを終了します。",
+    "commands.start-finetuning.description": "AIのファインチューニングセッションを開始します。",
+    "commands.edit.description": "現在のチャンネルでAIが送信した最後のメッセージを編集します。",
+    "commands.edit.new_content": "最後のAIメッセージを置き換える新しい内容。",
+    "commands.set-info.description": "カスタムコマンドの情報テキストを設定します。",
+    "commands.set-info.info": "コマンドの情報テキスト。",
+    "commands.make-command.description": "新しいカスタムコマンドを作成します。",
+    "commands.make-command.info": "コマンドのオプションの情報テキスト（提供されない場合は画像を添付する必要があります）",
+    "commands.make-command.command": "作成するコマンドの名前",
+    "commands.make-command.attachment": "コマンドに添付するオプションの画像（提供されない場合は情報テキストを提供する必要があります）",
+    "commands.remove-command.description": "既存のカスタムコマンドを削除します。",
+    "commands.remove-command.command": "削除するコマンドの名前",
 }
 
 
