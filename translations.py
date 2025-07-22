@@ -2,10 +2,21 @@ from __future__ import annotations
 
 import discord
 from discord import app_commands
+
+from bot import set_image
 # this apperenlty doesn't work but we'll leave it for now, just in case things start working again
 
 en = {
     "stop": "stop",
+    "set-image": "set-image",
+    "clear": "clear",
+    "end-finetuning": "end-finetuning",
+    "start-finetuning": "start-finetuning",
+    "edit": "edit",
+    "set-info": "set-info",
+    "make-command": "make-command",
+    "remove-command": "remove-command",
+
     "commands.stop.description": "Stops the AI conversation in the current channel.",
     "commands.set-image.description": "Sets an image for a custom command.",
     "commands.clear.description": "Clears the current channel's AI conversation.",
@@ -24,6 +35,15 @@ en = {
 }
 ja = {
     "stop": "停止",
+    "set-image": "画像を設定",
+    "clear": "クリア",
+    "end-finetuning": "ファインチューニング終了",
+    "start-finetuning": "ファインチューニング開始",
+    "edit": "編集",
+    "set-info": "情報設定",
+    "make-command": "コマンド作成",
+    "remove-command": "コマンド削除",
+    
     "commands.stop.description": "現在のチャンネルでAIの会話を停止します。",
     "commands.set-image.description": "カスタムコマンドの画像を設定します。",
     "commands.clear.description": "現在のチャンネルのAI会話をクリアします。",
@@ -50,7 +70,6 @@ class MyTranslator(app_commands.Translator):
         context: app_commands.TranslationContext,
     ) -> str | None:
         # For this example, we can translate a few words in Japanese...
-        
         message = str(string)
         if locale is discord.Locale.japanese:
             # If the locale is Japanese, return the Japanese translation, else return the English translation
