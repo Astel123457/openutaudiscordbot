@@ -45,5 +45,4 @@ class MyTranslator(app_commands.Translator):
             # If the locale is English, return the English translation
             return en.get(message, None)
         # Otherwise we don't handle it
-        print(f"'{string}' was missing a translation")
         return en.get(message, None)
