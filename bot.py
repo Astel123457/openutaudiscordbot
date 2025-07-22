@@ -708,12 +708,14 @@ class StickyNote(discord.ui.Modal, title="Create Sticky Note"):
     """
     Modal for creating a sticky note.
     """
+    def __init__(self, message: discord.Message):
+        self.message = message
     name = discord.ui.TextInput(label="Note Name", placeholder="Enter a name for the sticky note", required=True, max_length=100)
 
-    async def on_submit(self, interaction: discord.Interaction, message: discord.Message):
+    async def on_submit(self, interaction: discord.Interaction):
         # This method will be called when the modal is submitted
         name = self.name.value
-
+        message = self.message
         media_dir = "stickynote_media" # Directory to save media files
 
         if interaction.user.id not in config["moderators"]:
