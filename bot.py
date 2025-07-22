@@ -704,7 +704,7 @@ async def import_config(ctx: discord.Interaction, file: discord.Attachment):
 
 # --- NEW COMMANDS: Sticky Notes ---
 
-class StickyNote(discord.ui.Modal, title="Create Sticky Note"):
+class StickyNote(discord.ui.Modal, title="Create Sticky Note", custom_id="create_sticky_note"):
     """
     Modal for creating a sticky note.
     """

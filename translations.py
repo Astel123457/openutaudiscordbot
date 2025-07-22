@@ -15,8 +15,8 @@ class MyTranslator(app_commands.Translator):
         print(f"Translating '{string}' for locale '{locale}'")
         message = str(string)
         if locale is discord.Locale.japanese:
-            if message == 'Hello!':
-                return 'こんにちは！'
+            if message == 'Make Sticky Note':
+                return '付箋を作成する'
             elif message == 'Goodbye!':
                 return 'さようなら！'
 
