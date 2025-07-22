@@ -3,7 +3,6 @@ from __future__ import annotations
 import discord
 from discord import app_commands
 
-from bot import set_image
 # this apperenlty doesn't work but we'll leave it for now, just in case things start working again
 
 en = {
@@ -43,7 +42,7 @@ ja = {
     "set-info": "情報設定",
     "make-command": "コマンド作成",
     "remove-command": "コマンド削除",
-    
+
     "commands.stop.description": "現在のチャンネルでAIの会話を停止します。",
     "commands.set-image.description": "カスタムコマンドの画像を設定します。",
     "commands.clear.description": "現在のチャンネルのAI会話をクリアします。",
