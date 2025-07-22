@@ -4,6 +4,26 @@ import discord
 from discord import app_commands
 # this apperenlty doesn't work but we'll leave it for now, just in case things start working again
 
+en = {
+    "commands.stop": "Stop",
+    "commands.stop.description": "Stops the AI conversation in the current channel.",
+    "commands.set-image": "Set Image",
+    "commands.set-image.description": "Sets an image for a custom command.",
+    "commands.clear" : "Clear",
+    "commands.clear.description": "Clears the current channel's AI conversation.",
+
+    
+}
+ja = {
+    "commands.stop": "停止",
+    "commands.stop.description": "現在のチャンネルでAIの会話を停止します。",
+    "commands.set-image": "画像を設定",
+    "commands.set-image.description": "カスタムコマンドの画像を設定します。",
+    "commands.clear": "クリア",
+    "commands.clear.description": "現在のチャンネルのAI会話をクリアします。",
+}
+
+
 class MyTranslator(app_commands.Translator):
     async def translate(
         self,
@@ -15,10 +35,10 @@ class MyTranslator(app_commands.Translator):
         print(f"Translating '{string}' for locale '{locale}'")
         message = str(string)
         if locale is discord.Locale.japanese:
-            if message == 'Make Sticky Note':
-                return '付箋を作成する'
-            elif message == 'Goodbye!':
-                return 'さようなら！'
-
+            # If the locale is Japanese, return the Japanese translation, else return the English translation
+            return ja.get(message, en.get(message, None))
+        if locale is discord.Locale.american_english or locale is discord.Locale.british_english:
+            # If the locale is English, return the English translation
+            return en.get(message, None)
         # Otherwise we don't handle it
-        return None
+        return en.get(message, None)

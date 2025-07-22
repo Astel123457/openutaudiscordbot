@@ -212,7 +212,7 @@ def autocorrect_command(command_name):
     combined_matches = list(dict.fromkeys(substring_matches + close_matches))
     return combined_matches
 
-@client.tree.command(name='stop', description='Stops the AI conversation in the current channel.')
+@client.tree.command(name=app_commands.locale_str("commands.stop"), description=app_commands.locale_str("commands.stop.description"))
 async def stop(ctx: discord.Interaction):
     """
     Stops the current AI conversation
@@ -259,7 +259,7 @@ async def send_temp_error(ctx: discord.Interaction, message_content: str, error_
             pass
 
 # --- Bot Commands ---
-@client.tree.command(name='set-image', description='Sets an image for a custom command.')
+@client.tree.command(name='commands.set-image', description='commands.set-image.description')
 async def set_image(ctx: discord.Interaction, command: str, image: discord.Attachment):
     """
     Sets an image for a custom command.
@@ -287,7 +287,7 @@ async def set_image(ctx: discord.Interaction, command: str, image: discord.Attac
     update_command_list() 
     await ctx.response.send_message(f"The image for the command `{command}` has been set successfully!")
 
-@client.tree.command(name='clear', description='Clears the channel\'s message history for the AI chat.')
+@client.tree.command(name='commands.clear', description='commands.clear.description')
 async def clear(ctx: discord.Interaction):
     """
     Clears the channel's message history for the AI chat.
