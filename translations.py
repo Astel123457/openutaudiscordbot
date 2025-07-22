@@ -5,11 +5,11 @@ from discord import app_commands
 # this apperenlty doesn't work but we'll leave it for now, just in case things start working again
 
 en = {
-    "commands.stop": "stop",
+    "commands-stop": "stop",
     "commands.stop.description": "Stops the AI conversation in the current channel.",
-    "commands.set-image": "set image",
+    "commands-set-image": "set image",
     "commands.set-image.description": "Sets an image for a custom command.",
-    "commands.clear" : "clear",
+    "commands-clear" : "clear",
     "commands.clear.description": "Clears the current channel's AI conversation.",
 
     
