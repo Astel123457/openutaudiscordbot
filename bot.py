@@ -98,7 +98,6 @@ async def on_message(message: discord.Message):
     last_sent = time.time()
     if starts_with_prefix:
         if not message.author.id in config.get("moderators", []):
-            await message.channel.send("Only trusted users are allowed to use the AI chat function for the moment.")
             return
         prompt = message.content[1:].strip()
         #Get the channel ID to use as a key for message history
