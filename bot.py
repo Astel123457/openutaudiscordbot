@@ -399,7 +399,7 @@ async def set_info(ctx: discord.Interaction, command: str, info: str):
         json.dump(config, f, indent=4)
 
     update_command_list()
-    await ctx.send(f"The info for the command `{command}` has been set successfully!")
+    await ctx.response.send_message(f"The info for the command `{command}` has been set successfully!")
 
 @client.tree.command(name='make-command', description='commands.make-command.description')
 @app_commands.describe(
@@ -703,6 +703,21 @@ async def import_config(ctx: discord.Interaction, file: discord.Attachment):
 
     update_command_list()
     await ctx.followup.send("Configuration imported successfully.")
+
+@client.tree.command(name='send-config', description='Dev use only: Sends the current config.json file.')
+async def send_config(ctx: discord.Interaction):
+    """Sends the current config.json file."""
+
+    # Only allow moderators to run this command
+    if ctx.user.id not in config.get("moderators", []):
+        await send_temp_error(ctx, "You do not have permission to use this command.")
+        return
+    
+    try:
+        await ctx.followup.send(file=discord.File("config.json"), ephemeral=True)
+    except Exception as e:
+        await ctx.followup.send(f"Failed to read config: {e}", ephemeral=True)
+        return
 
 # --- NEW COMMANDS: Sticky Notes ---
 
