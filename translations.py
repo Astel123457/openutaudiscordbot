@@ -15,6 +15,7 @@ en = {
     "set-info": "set-info",
     "make-command": "make-command",
     "remove-command": "remove-command",
+    "channel-language": "The bot will respond in English when an English translation is available.",
 
     "commands.stop.description": "Stops the AI conversation in the current channel.",
     "commands.set-image.description": "Sets an image for a custom command.",
@@ -42,6 +43,7 @@ ja = {
     "set-info": "情報設定",
     "make-command": "コマンド作成",
     "remove-command": "コマンド削除",
+    "channel-language": "利用可能な場合、日本語の翻訳がある場合はボットが日本語で応答します。",
 
     "commands.stop.description": "現在のチャンネルでAIの会話を停止します。",
     "commands.set-image.description": "カスタムコマンドの画像を設定します。",

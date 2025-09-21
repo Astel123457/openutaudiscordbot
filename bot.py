@@ -276,9 +276,9 @@ async def set_image(ctx: discord.Interaction, command: str, image: discord.Attac
         conf = config.get(command, None)
 
     conf["has_image"] = True
-
-    await image.save(command + ".png")  # this is the image that is being sent
-    conf["image"] = command + ".png"  
+    _, file_extension = os.path.splitext(image.filename)
+    await image.save(command + file_extension)  # this is the image that is being sent
+    conf["image"] = command + file_extension
 
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
@@ -432,7 +432,8 @@ async def make_command(ctx: discord.Interaction, command: str, info: str = None,
     config[command] = {"info": info, "has_image": has_image}
 
     if has_image:
-        image_filename = command + ".png"
+        _, file_extension = os.path.splitext(attachment.filename)
+        image_filename = command + file_extension
         image_path = os.path.join("images", image_filename)
         os.makedirs(os.path.dirname(image_path), exist_ok=True)
         await attachment.save(image_path)
