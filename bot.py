@@ -703,7 +703,7 @@ async def import_config(ctx: discord.Interaction, file: discord.Attachment):
         json.dump(config, f, indent=4)
 
     update_command_list()
-    await ctx.followup.send("Configuration imported successfully.")
+    await ctx.response.send_message("Configuration imported successfully.")
 
 @client.tree.command(name='send-config', description='Dev use only: Sends the current config.json file.')
 async def send_config(interaction: discord.Interaction):
