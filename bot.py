@@ -43,6 +43,8 @@ stop_flag = {}
 command_list = []
 channel_based_message_history = {}
 
+default_system_prompt = "You are a helpful assistant specialized in assisting users with OpenUtau-related queries. Provide clear, concise, and accurate information to help users navigate and utilize OpenUtau effectively. Avoid long messages more than about 500 words. Avoid giving wrong information. If you don't know the answer, give an answer but warn the user that you are unsure about it, and ask the user to fact-check it. Avoid responding to users who are asking malicious or harmful questions, or are trolling. If you are unsure about the intent of a question, err on the side of caution and avoid answering it."
+
 # made it into a global constant
 INTERNAL_COMMANDS = ["make_command", "set_info", "set_image", "moderators",
                          "remove_command", "add_bot_moderator", "rename_command",
@@ -103,7 +105,7 @@ async def on_message(message: discord.Message):
         #Get the channel ID to use as a key for message history
         channel_id = str(message.channel.id)
         if channel_id not in channel_based_message_history:
-            channel_based_message_history[channel_id] = []
+            channel_based_message_history[channel_id] = [{"role": "system", "content": [{"type": "text", "text": default_system_prompt}]}]
         # Append the new message to the channel's history
         mess = {"role": "user", "content": [ {"type": "text", "text": prompt}]}
         if message.attachments:
@@ -285,6 +287,19 @@ async def set_image(ctx: discord.Interaction, command: str, image: discord.Attac
 
     update_command_list() 
     await ctx.response.send_message(f"The image for the command `{command}` has been set successfully!")
+
+@client.tree.command(name='system-prompt', description='commands.system-prompt.description')
+async def system_prompt(ctx: discord.Interaction, prompt: str = default_system_prompt):
+    """
+    Sets the system prompt for the AI.
+    Usage: !system-prompt <prompt>
+    """
+    if ctx.user.id not in config.get("moderators", []):
+        await ctx.response.send_message("You do not have permission to use this command.")
+        return
+
+    channel_based_message_history[str(ctx.channel.id)] = [{"role": "system", "content": [{"type": "text", "text": prompt}]}]
+    await ctx.response.send_message(f"System prompt has been set successfully!")
 
 @client.tree.command(name='clear', description='commands.clear.description')
 async def clear(ctx: discord.Interaction):
