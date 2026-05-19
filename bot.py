@@ -240,6 +240,23 @@ def autocorrect_command(command_name):
     combined_matches = list(dict.fromkeys(substring_matches + close_matches))
     return combined_matches
 
+async def command_autocompleter(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Autocompletes custom command names for slash commands."""
+    global command_list
+    update_command_list()
+
+    choices = []
+    for command_name in command_list:
+        if current.lower() in command_name.lower():
+            choices.append(app_commands.Choice(name=command_name, value=command_name))
+    
+    # Sort by relevance
+    choices.sort(key=lambda c: c.name.lower().find(current.lower())) 
+    return choices[:25]
+
 @client.tree.command(name="stop", description="commands.stop.description")
 async def stop(ctx: discord.Interaction):
     """
@@ -288,6 +305,7 @@ async def send_temp_error(ctx: discord.Interaction, message_content: str, error_
 
 # --- Bot Commands ---
 @client.tree.command(name='set-image', description='commands.set-image.description')
+@app_commands.autocomplete(command=command_autocompleter)
 async def set_image(ctx: discord.Interaction, command: str, image: discord.Attachment):
     """
     Sets an image for a custom command.
@@ -420,6 +438,7 @@ async def edit(ctx: discord.Interaction, *, new_content: str):
 
 @client.tree.command(name='set-info', description='commands.set-info.description')
 @app_commands.describe(command="commands.make-command.command", info="commands.set-info.info")
+@app_commands.autocomplete(command=command_autocompleter)
 async def set_info(ctx: discord.Interaction, command: str, info: str):
     """
     Sets the informational text for a custom command.
@@ -489,19 +508,20 @@ async def make_command(ctx: discord.Interaction, command: str, info: str = None,
 
 @client.tree.command(name='remove-command', description='commands.remove-command.description')
 @app_commands.describe(command="commands.remove-command.command")
+@app_commands.autocomplete(command=command_autocompleter)
 async def remove_command(ctx: discord.Interaction, command: str): 
     """
     Deletes an existing custom command.
     Requires moderator permissions.
     """
     if ctx.user.id not in config["moderators"]:
-        await ctx.response.send_message("You do not have permission to use this command.")
+        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
     if command not in config:
-        await ctx.response.send_message(f"The command `{command}` does not exist.")
+        await ctx.response.send_message(f"The command `{command}` does not exist.", ephemeral=True)
         return
 
-    await interaction.response.defer(ephemeral=True)
+    await ctx.response.defer(ephemeral=True)
     removed_command_data = config.pop(command)
 
     # If the command had an associated image, delete the file
@@ -513,13 +533,13 @@ async def remove_command(ctx: discord.Interaction, command: str):
                 print(f"Removed image file: {image_path}")
             except OSError as e:
                 print(f"Error removing image file {image_path}: {e}")
-                await interaction.followup.send(f"Warning: Failed to delete associated image file: {e}", ephemeral=True)
+                await ctx.followup.send(f"Warning: Failed to delete associated image file: {e}", ephemeral=True)
 
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
 
     update_command_list()
-    await ctx.response.send_message(f"The command `{command}` has been removed successfully!")
+    await ctx.followup.send(f"The command `{command}` has been removed successfully!", ephemeral=True)
 
 @client.tree.command(name='add-bot-moderator', description='Adds a user as a bot moderator.')
 @app_commands.describe(user="The user to add as a moderator")
@@ -1047,7 +1067,6 @@ async def remove_stickynote(ctx: commands.Context, name: str):
     Usage: !remove_stickynote <note_name>
     """
     error_message_lifetime = 30
-    media_dir = "stickynote_media"
 
     if ctx.author.id not in config["moderators"]:
         msg = await ctx.send("You do not have permission to use this command.")
@@ -1056,7 +1075,27 @@ async def remove_stickynote(ctx: commands.Context, name: str):
         except discord.NotFound: pass
         return
 
-    if name not in config["stickynotes"]:
+    # --- DYNAMIC/FUZZY MATCHING ---
+    matched_name = None
+    all_notes = list(config.get("stickynotes", {}).keys())
+    norm_target = name.lower().replace("-", "").replace("_", "")
+
+    if name in all_notes:
+        matched_name = name
+    else:
+        for note in all_notes:
+            if note.lower().replace("-", "").replace("_", "") == norm_target:
+                matched_name = note
+                break
+        if not matched_name:
+            matches = get_close_matches(name.lower(), [n.lower() for n in all_notes], n=1, cutoff=0.8)
+            if matches:
+                for note in all_notes:
+                    if note.lower() == matches[0]:
+                        matched_name = note
+                        break
+
+    if not matched_name:
         msg = await ctx.send(f"Sticky note `{name}` does not exist.")
         await asyncio.sleep(error_message_lifetime)
         try: await msg.delete()
@@ -1064,7 +1103,7 @@ async def remove_stickynote(ctx: commands.Context, name: str):
         return
 
     # Delete associated media file if it exists
-    note_data = config["stickynotes"][name]
+    note_data = config["stickynotes"][matched_name]
     if note_data.get("media_url") and os.path.exists(note_data["media_url"]):
         try:
             os.remove(note_data["media_url"])
@@ -1072,12 +1111,12 @@ async def remove_stickynote(ctx: commands.Context, name: str):
         except OSError as e:
             print(f"Error removing sticky note media file {note_data['media_url']}: {e}")
 
-    del config["stickynotes"][name]
+    del config["stickynotes"][matched_name]
 
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
 
-    await ctx.send(f"Sticky note `{name}` has been successfully removed.")
+    await ctx.send(f"Sticky note `{matched_name}` has been successfully removed.")
 
 # --- NEW COMMAND: !stickynote ---
 @client.command(name='stickynote')
@@ -1088,7 +1127,27 @@ async def stickynote(ctx: commands.Context, name: str):
     """
     error_message_lifetime = 30
 
-    note_data = config["stickynotes"].get(name)
+    # --- DYNAMIC/FUZZY MATCHING ---
+    matched_name = None
+    all_notes = list(config.get("stickynotes", {}).keys())
+    norm_target = name.lower().replace("-", "").replace("_", "")
+
+    if name in all_notes:
+        matched_name = name
+    else:
+        for note in all_notes:
+            if note.lower().replace("-", "").replace("_", "") == norm_target:
+                matched_name = note
+                break
+        if not matched_name:
+            matches = get_close_matches(name.lower(), [n.lower() for n in all_notes], n=1, cutoff=0.8)
+            if matches:
+                for note in all_notes:
+                    if note.lower() == matches[0]:
+                        matched_name = note
+                        break
+
+    note_data = config["stickynotes"].get(matched_name) if matched_name else None
 
     if not note_data:
         msg = await ctx.send(f"Sticky note `{name}` not found. Use `!list_stickynote` to see available notes.")
@@ -1100,7 +1159,7 @@ async def stickynote(ctx: commands.Context, name: str):
     jump_url = f"https://discord.com/channels/{ctx.guild.id}/{note_data['channel_id']}/{note_data['message_id']}"
 
     embed = discord.Embed(
-        title=f"Sticky Note: '{name}'",
+        title=f"Sticky Note: '{matched_name}'",
         description=note_data['content'],
         color=discord.Color.gold()
     )
