@@ -154,33 +154,60 @@ async def on_message(message: discord.Message):
                     await main_message.edit(content=current_message_content+"...")
                     
 
-    if message.content.startswith(client.command_prefix) and not message.content.startswith(f'{client.command_prefix}moderators'):
+    if message.content.startswith(client.command_prefix):
         command_name = message.content[len(client.command_prefix):].split()[0]
-        conf = config.get(command_name, None)
+        
+        #Don't intercept internal bot commands or config lists
+        if command_name not in INTERNAL_COMMANDS and command_name not in ["moderators", "stickynotes"]:
+            
+            matched_command = None
+            norm_target = command_name.lower().replace("-", "").replace("_", "")
+            custom_commands = [k for k in config.keys() if k not in INTERNAL_COMMANDS and k not in ["moderators", "stickynotes"]]
+            
+            #Check for exact match
+            if command_name in custom_commands:
+                matched_command = command_name
+            else:
+                #Check for normalized match (handles !off-topic, !offtopic, !Offtopic)
+                for key in custom_commands:
+                    if key.lower().replace("-", "").replace("_", "") == norm_target:
+                        matched_command = key
+                        break
+                
+                #Check for fuzzy match (handles slight typos like !of-topic)
+                if not matched_command:
+                    matches = get_close_matches(command_name.lower(), [k.lower() for k in custom_commands], n=1, cutoff=0.8)
+                    if matches:
+                        for k in custom_commands:
+                            if k.lower() == matches[0]:
+                                matched_command = k
+                                break
+                                
+            if matched_command:
+                conf = config.get(matched_command)
+                
+                if isinstance(conf, dict): 
+                    info = conf.get("info", None)
+                    has_image = conf.get("has_image", False)
 
-        if conf is not None: # If the command exists in config
-            info = conf.get("info", None)
-            has_image = conf.get("has_image", False)
-
-            if has_image:
-                image_path = conf.get("image", None)
-                if image_path and os.path.exists(image_path):
-                    try:
-                        # Send info and image if both exist, otherwise just image
-                        if info:
-                            await message.channel.send(info, file=discord.File(image_path))
+                    if has_image:
+                        image_path = conf.get("image", None)
+                        if image_path and os.path.exists(image_path):
+                            try:
+                                if info:
+                                    await message.channel.send(info, file=discord.File(image_path))
+                                else:
+                                    await message.channel.send(file=discord.File(image_path))
+                                print(f"Sent image for command {matched_command} from {image_path}")
+                            except Exception as e:
+                                print(f"Error sending image for command {matched_command}: {e}")
                         else:
-                            await message.channel.send(file=discord.File(image_path))
-                        print(f"Sent image for command {command_name} from {image_path}")
-                    except Exception as e:
-                        print(f"Error sending image for command {command_name}: {e}")
-                else:
-                    print(f"Image path not found or invalid for command {command_name}: {image_path}")
-                    if info:
+                            print(f"Image path not found or invalid for command {matched_command}: {image_path}")
+                            if info:
+                                await message.channel.send(info)
+                    elif info:
                         await message.channel.send(info)
-            elif info:
-                await message.channel.send(info)
-            return 
+                    return
 
     # Handle bot mentions
     if client.user.mentioned_in(message):
@@ -238,7 +265,7 @@ async def sync(ctx: commands.Context):
     Syncs the bot's command list with the Discord server.
     """
     del1 = await ctx.send("Syncing commands...")
-    await client.tree.sync()
+    await client.tree.sync(guild=discord.Object(id=866983515090059265))
     del2 = await ctx.send("Commands synced successfully!")
     await asyncio.sleep(5)  # Wait for a few seconds before deleting the message
     await del1.delete()
@@ -378,7 +405,29 @@ async def edit(ctx: commands.Context, *, new_content: str):
 
     await ctx.send("No recent AI message found to edit.")
 
+async def command_autocompleter(
+    interaction: discord.Interaction,
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    """Autocompletes custom command names."""
+    global command_list
+    update_command_list()
+
+    choices = []
+    for command_name in command_list:
+        if current.lower() in command_name.lower():
+            choices.append(app_commands.Choice(name=command_name, value=command_name))
+    
+    # Discord limits choices to 25. Sort for better user experience.
+    choices.sort(key=lambda c: c.name.lower().find(current.lower())) # Sort by relevance
+    return choices[:25]
+
 @client.tree.command(name='set-info', description='Sets the informational text for a custom command.')
+@app_commands.describe(
+    command="The name of the command to set info for",
+    info="The informational of the"
+)
+@app_commands.autocomplete(command=command_autocompleter)
 async def set_info(ctx: discord.Interaction, command: str, info: str):
     """
     Sets the informational text for a custom command.
@@ -442,23 +491,25 @@ async def make_command(ctx: discord.Interaction, command: str, info: str = None,
     update_command_list()
     await ctx.response.send_message(f"The command `{command}` has been created successfully!")
 
-@client.command()
-async def remove_command(ctx: commands.Context, command: str = None): 
+@client.tree.command(name='delete-command', description='Deletes an existing custom command.')
+@app_commands.describe(
+    command="The name of the command to delete"
+)
+@app_commands.autocomplete(command=command_autocompleter)
+async def delete_command(interaction: discord.Interaction, command: str):
     """
-    Removes an existing custom command.
+    Deletes an existing custom command.
     Requires moderator permissions.
-    Usage: !remove_command <command_name>
     """
-    if ctx.author.id not in config["moderators"]:
-        await ctx.send("You do not have permission to use this command.")
+    if interaction.user.id not in config["moderators"]:
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
-    if command is None:
-        await ctx.send("You must provide a command to remove.")
-        return
+    
     if command not in config:
-        await ctx.send(f"The command `{command}` does not exist.")
+        await interaction.response.send_message(f"The command `{command}` does not exist.", ephemeral=True)
         return
 
+    await interaction.response.defer(ephemeral=True)
     removed_command_data = config.pop(command)
 
     # If the command had an associated image, delete the file
@@ -470,12 +521,13 @@ async def remove_command(ctx: commands.Context, command: str = None):
                 print(f"Removed image file: {image_path}")
             except OSError as e:
                 print(f"Error removing image file {image_path}: {e}")
+                await interaction.followup.send(f"Warning: Failed to delete associated image file: {e}", ephemeral=True)
 
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
 
     update_command_list()
-    await ctx.send(f"The command `{command}` has been removed successfully!")
+    await interaction.followup.send(f"The command `{command}` has been removed successfully!", ephemeral=True)
 
 @client.command()
 async def add_bot_moderator(ctx: commands.Context, user: discord.User): 
