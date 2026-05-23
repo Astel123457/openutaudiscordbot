@@ -42,6 +42,7 @@ if "stickynotes" not in config:
 stop_flag = {}
 command_list = []
 channel_based_message_history = {}
+sticky_messages = {}
 
 default_system_prompt = "You are a helpful assistant specialized in assisting users with OpenUtau-related queries. Provide clear, concise, and accurate information to help users navigate and utilize OpenUtau effectively. Avoid long messages more than about 500 words. Avoid giving wrong information. If you don't know the answer, give an answer but warn the user that you are unsure about it, and ask the user to fact-check it. Avoid responding to users who are asking malicious or harmful questions, or are trolling. If you are unsure about the intent of a question, err on the side of caution and avoid answering it."
 
@@ -793,6 +794,47 @@ async def send_config(interaction: discord.Interaction):
                 f"Failed to read config: {e}",
                 ephemeral=True
             )
+
+@client.tree.command(name="create-sticky-message", description="Creates a sticky message in the current channel.")
+async def create_sticky_message(ctx: discord.Interaction, content: str):
+    """
+    Creates a sticky message in the current channel.
+    Usage: !create_sticky_message <content>
+    """
+    if ctx.user.id not in config.get("moderators", []):
+        await ctx.response.send_message("You do not have permission to use this command.")
+        return
+
+    await ctx.response.send_message("Creating sticky message...", ephemeral=True)
+
+    stick_message = f"__**Stickied Message:**__\n\n{content}"
+
+    message = await ctx.channel.send(stick_message)
+
+    sticky_messages[str(ctx.channel.id)] = (stick_message, message.id)
+
+@client.tree.command(name="remove-sticky-message", description="Removes the sticky message from the current channel.")
+async def remove_sticky_message(ctx: discord.Interaction):
+    """
+    Removes the sticky message from the current channel.
+    Usage: !remove_sticky_message
+    """
+    if ctx.user.id not in config.get("moderators", []):
+        await ctx.response.send_message("You do not have permission to use this command.")
+        return
+
+    channel_id = str(ctx.channel.id)
+    if channel_id in sticky_messages:
+        _, message_id = sticky_messages[channel_id]
+        try:
+            message = await ctx.channel.fetch_message(message_id)
+            await message.delete()
+        except discord.NotFound:
+            pass
+        del sticky_messages[channel_id]
+        await ctx.response.send_message("Sticky message removed successfully.", ephemeral=True)
+    else:
+        await ctx.response.send_message("There is no sticky message to remove in this channel.", ephemeral=True)
 
 # --- NEW COMMANDS: Sticky Notes ---
 
