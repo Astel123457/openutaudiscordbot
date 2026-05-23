@@ -38,11 +38,17 @@ if "stickynotes" not in config:
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
 
+# Ensure 'sticky_messages' key exists and load persisted data
+if "sticky_messages" not in config:
+    config["sticky_messages"] = {}
+    with open("config.json", "w") as f:
+        json.dump(config, f, indent=4)
+
 # Stop flag for AI Chatbot
 stop_flag = {}
 command_list = []
 channel_based_message_history = {}
-sticky_messages = {}
+sticky_messages = {k: tuple(v) for k, v in config.get("sticky_messages", {}).items()}
 
 default_system_prompt = "You are a helpful assistant specialized in assisting users with OpenUtau-related queries. Provide clear, concise, and accurate information to help users navigate and utilize OpenUtau effectively. Avoid long messages more than about 500 words. Avoid giving wrong information. If you don't know the answer, give an answer but warn the user that you are unsure about it, and ask the user to fact-check it. Avoid responding to users who are asking malicious or harmful questions, or are trolling. If you are unsure about the intent of a question, err on the side of caution and avoid answering it."
 
@@ -215,12 +221,18 @@ async def on_message(message: discord.Message):
     if sticky_messages.get(str(message.channel.id)) is not None:
         sticky_message, sticky_message_id = sticky_messages[str(message.channel.id)]
         try:
-            sticky_message = await message.channel.fetch_message(sticky_message_id)
-            await sticky_message.delete()
-            new_message = await message.channel.send(sticky_message.content)
-            sticky_messages[str(message.channel.id)] = (sticky_message, new_message.id)
+            fetched = await message.channel.fetch_message(sticky_message_id)
+            await fetched.delete()
+            new_message = await message.channel.send(fetched.content)
+            sticky_messages[str(message.channel.id)] = (fetched.content, new_message.id)
+            config["sticky_messages"][str(message.channel.id)] = [fetched.content, new_message.id]
+            with open("config.json", "w") as f:
+                json.dump(config, f, indent=4)
         except discord.NotFound:
-            sticky_messages[str(message.channel.id)] = None  # Clear the sticky message if it was deleted
+            sticky_messages.pop(str(message.channel.id), None)
+            config["sticky_messages"].pop(str(message.channel.id), None)
+            with open("config.json", "w") as f:
+                json.dump(config, f, indent=4)
 
     # Handle bot mentions
     if client.user.mentioned_in(message):
@@ -822,6 +834,9 @@ async def create_sticky_message(ctx: discord.Interaction, content: str):
     message = await ctx.channel.send(stick_message)
 
     sticky_messages[str(ctx.channel.id)] = (stick_message, message.id)
+    config["sticky_messages"][str(ctx.channel.id)] = [stick_message, message.id]
+    with open("config.json", "w") as f:
+        json.dump(config, f, indent=4)
 
 @client.tree.command(name="remove-sticky-message", description="Removes the sticky message from the current channel.")
 async def remove_sticky_message(ctx: discord.Interaction):
@@ -842,6 +857,9 @@ async def remove_sticky_message(ctx: discord.Interaction):
         except discord.NotFound:
             pass
         del sticky_messages[channel_id]
+        config["sticky_messages"].pop(channel_id, None)
+        with open("config.json", "w") as f:
+            json.dump(config, f, indent=4)
         await ctx.response.send_message("Sticky message removed successfully.", ephemeral=True)
     else:
         await ctx.response.send_message("There is no sticky message to remove in this channel.", ephemeral=True)
