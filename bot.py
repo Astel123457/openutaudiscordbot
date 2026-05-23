@@ -818,7 +818,7 @@ async def send_config(interaction: discord.Interaction):
             )
 
 @client.tree.command(name="create-sticky-message", description="Creates a sticky message in the current channel.")
-async def create_sticky_message(ctx: discord.Interaction, content: str):
+async def create_sticky_message(ctx: discord.Interaction, content: str, prepend: bool = True):
     """
     Creates a sticky message in the current channel.
     Usage: !create_sticky_message <content>
@@ -828,8 +828,11 @@ async def create_sticky_message(ctx: discord.Interaction, content: str):
         return
 
     await ctx.response.send_message("Creating sticky message...", ephemeral=True)
+    
+    if prepend: prepend_message = "__**Stickied Message:**__\n\n"
+    else: prepend_message = ""
 
-    stick_message = f"__**Stickied Message:**__\n\n{content}"
+    stick_message = f"{prepend_message}{content}"
 
     message = await ctx.channel.send(stick_message)
 
