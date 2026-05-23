@@ -211,6 +211,16 @@ async def on_message(message: discord.Message):
                     elif info:
                         await message.channel.send(info)
                     return
+                
+    if sticky_messages.get(str(message.channel.id)) is not None:
+        sticky_message, sticky_message_id = sticky_messages[str(message.channel.id)]
+        try:
+            sticky_message = await message.channel.fetch_message(sticky_message_id)
+            await sticky_message.delete()
+            new_message = await message.channel.send(sticky_message.content)
+            sticky_messages[str(message.channel.id)] = (sticky_message, new_message.id)
+        except discord.NotFound:
+            sticky_messages[str(message.channel.id)] = None  # Clear the sticky message if it was deleted
 
     # Handle bot mentions
     if client.user.mentioned_in(message):
