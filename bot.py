@@ -229,8 +229,10 @@ async def on_message(message: discord.Message):
             with open("config.json", "w") as f:
                 json.dump(config, f, indent=4)
         except discord.NotFound:
-            sticky_messages.pop(str(message.channel.id), None)
-            config["sticky_messages"].pop(str(message.channel.id), None)
+            # if message isn't found, post a new one
+            new_message = await message.channel.send(sticky_message)
+            sticky_messages[str(message.channel.id)] = (sticky_message, new_message.id)
+            config["sticky_messages"][str(message.channel.id)] = [sticky_message, new_message.id]
             with open("config.json", "w") as f:
                 json.dump(config, f, indent=4)
 
@@ -828,7 +830,7 @@ async def create_sticky_message(ctx: discord.Interaction, content: str, prepend:
         return
 
     await ctx.response.send_message("Creating sticky message...", ephemeral=True)
-    
+
     if prepend: prepend_message = "__**Stickied Message:**__\n\n"
     else: prepend_message = ""
 
