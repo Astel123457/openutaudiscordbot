@@ -49,6 +49,8 @@ stop_flag = {}
 command_list = []
 channel_based_message_history = {}
 sticky_messages = {k: tuple(v) for k, v in config.get("sticky_messages", {}).items()}
+sticky_message_locks: dict[str, asyncio.Lock] = {}
+sticky_repost_tasks: dict[str, asyncio.Task] = {}
 
 default_system_prompt = "You are a helpful assistant specialized in assisting users with OpenUtau-related queries. Provide clear, concise, and accurate information to help users navigate and utilize OpenUtau effectively. Avoid long messages more than about 500 words. Avoid giving wrong information. If you don't know the answer, give an answer but warn the user that you are unsure about it, and ask the user to fact-check it. Avoid responding to users who are asking malicious or harmful questions, or are trolling. If you are unsure about the intent of a question, err on the side of caution and avoid answering it."
 
@@ -88,6 +90,29 @@ STOP_MESSAGES = [
     "Dialogue concluded. Ready for new instructions.",
     "OK, I was gagged by that.",
 ]
+
+async def _do_sticky_repost(channel_id_str: str, channel: discord.TextChannel):
+    await asyncio.sleep(0.3)
+    if channel_id_str not in sticky_message_locks:
+        sticky_message_locks[channel_id_str] = asyncio.Lock()
+    async with sticky_message_locks[channel_id_str]:
+        if sticky_messages.get(channel_id_str) is None:
+            return
+        sticky_message, sticky_message_id = sticky_messages[channel_id_str]
+        try:
+            fetched = await channel.fetch_message(sticky_message_id)
+            await fetched.delete()
+            new_message = await channel.send(fetched.content)
+            sticky_messages[channel_id_str] = (fetched.content, new_message.id)
+            config["sticky_messages"][channel_id_str] = [fetched.content, new_message.id]
+            with open("config.json", "w") as f:
+                json.dump(config, f, indent=4)
+        except discord.NotFound:
+            new_message = await channel.send(sticky_message)
+            sticky_messages[channel_id_str] = (sticky_message, new_message.id)
+            config["sticky_messages"][channel_id_str] = [sticky_message, new_message.id]
+            with open("config.json", "w") as f:
+                json.dump(config, f, indent=4)
 
 # --- Bot Events ---
 @client.event
@@ -218,23 +243,14 @@ async def on_message(message: discord.Message):
                         await message.channel.send(info)
                     return
                 
-    if sticky_messages.get(str(message.channel.id)) is not None:
-        sticky_message, sticky_message_id = sticky_messages[str(message.channel.id)]
-        try:
-            fetched = await message.channel.fetch_message(sticky_message_id)
-            await fetched.delete()
-            new_message = await message.channel.send(fetched.content)
-            sticky_messages[str(message.channel.id)] = (fetched.content, new_message.id)
-            config["sticky_messages"][str(message.channel.id)] = [fetched.content, new_message.id]
-            with open("config.json", "w") as f:
-                json.dump(config, f, indent=4)
-        except discord.NotFound:
-            # if message isn't found, post a new one
-            new_message = await message.channel.send(sticky_message)
-            sticky_messages[str(message.channel.id)] = (sticky_message, new_message.id)
-            config["sticky_messages"][str(message.channel.id)] = [sticky_message, new_message.id]
-            with open("config.json", "w") as f:
-                json.dump(config, f, indent=4)
+    channel_id_str = str(message.channel.id)
+    if sticky_messages.get(channel_id_str) is not None:
+        existing_task = sticky_repost_tasks.get(channel_id_str)
+        if existing_task and not existing_task.done():
+            existing_task.cancel()
+        sticky_repost_tasks[channel_id_str] = asyncio.ensure_future(
+            _do_sticky_repost(channel_id_str, message.channel)
+        )
 
     # Handle bot mentions
     if client.user.mentioned_in(message):
