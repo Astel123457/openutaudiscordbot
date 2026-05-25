@@ -50,7 +50,7 @@ command_list = []
 channel_based_message_history = {}
 sticky_messages = {k: tuple(v) for k, v in config.get("sticky_messages", {}).items()}
 sticky_message_locks: dict[str, asyncio.Lock] = {}
-sticky_repost_tasks: dict[str, asyncio.Task] = {}
+sticky_last_message_time: dict[str, float] = {}
 
 default_system_prompt = "You are a helpful assistant specialized in assisting users with OpenUtau-related queries. Provide clear, concise, and accurate information to help users navigate and utilize OpenUtau effectively. Avoid long messages more than about 500 words. Avoid giving wrong information. If you don't know the answer, give an answer but warn the user that you are unsure about it, and ask the user to fact-check it. Avoid responding to users who are asking malicious or harmful questions, or are trolling. If you are unsure about the intent of a question, err on the side of caution and avoid answering it."
 
@@ -91,8 +91,11 @@ STOP_MESSAGES = [
     "OK, I was gagged by that.",
 ]
 
-async def _do_sticky_repost(channel_id_str: str, channel: discord.TextChannel):
+async def _do_sticky_repost(channel_id_str: str, channel: discord.TextChannel, trigger_time: float):
     await asyncio.sleep(0.3)
+    # If a newer message arrived during our sleep, let that task handle the repost
+    if sticky_last_message_time.get(channel_id_str) != trigger_time:
+        return
     if channel_id_str not in sticky_message_locks:
         sticky_message_locks[channel_id_str] = asyncio.Lock()
     async with sticky_message_locks[channel_id_str]:
@@ -245,12 +248,9 @@ async def on_message(message: discord.Message):
                 
     channel_id_str = str(message.channel.id)
     if sticky_messages.get(channel_id_str) is not None:
-        existing_task = sticky_repost_tasks.get(channel_id_str)
-        if existing_task and not existing_task.done():
-            existing_task.cancel()
-        sticky_repost_tasks[channel_id_str] = asyncio.ensure_future(
-            _do_sticky_repost(channel_id_str, message.channel)
-        )
+        now = time.monotonic()
+        sticky_last_message_time[channel_id_str] = now
+        asyncio.ensure_future(_do_sticky_repost(channel_id_str, message.channel, now))
 
     # Handle bot mentions
     if client.user.mentioned_in(message):
