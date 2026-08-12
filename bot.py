@@ -68,6 +68,43 @@ def _save_sticky_message(channel_id_str: str, sticky_data: dict):
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
 
+
+def _parse_sticky_timeout(timeout_value: str) -> float:
+    normalized_value = timeout_value.strip()
+    if not normalized_value:
+        raise ValueError("Timeout cannot be empty.")
+
+    if ":" not in normalized_value:
+        timeout_minutes = float(normalized_value)
+        if timeout_minutes < 0:
+            raise ValueError("Timeout must be 0 or greater.")
+        return timeout_minutes * 60
+
+    parts = normalized_value.split(":")
+    if len(parts) not in (2, 3):
+        raise ValueError("Timeout must use hh:mm:ss or mm:ss format.")
+    if any(part == "" for part in parts):
+        raise ValueError("Timeout contains an empty time segment.")
+
+    try:
+        time_parts = [int(part) for part in parts]
+    except ValueError as exc:
+        raise ValueError("Timeout must contain only whole numbers separated by colons.") from exc
+
+    if any(part < 0 for part in time_parts):
+        raise ValueError("Timeout must be 0 or greater.")
+
+    if len(time_parts) == 2:
+        minutes, seconds = time_parts
+        hours = 0
+    else:
+        hours, minutes, seconds = time_parts
+
+    if seconds >= 60 or minutes >= 60:
+        raise ValueError("Minutes and seconds must be less than 60 in colon-based timeouts.")
+
+    return float(hours * 3600 + minutes * 60 + seconds)
+
 # Stop flag for AI Chatbot
 stop_flag = {}
 command_list = []
@@ -897,9 +934,9 @@ async def send_config(interaction: discord.Interaction):
 @app_commands.describe(
     content="The message content to pin at the bottom of the channel",
     prepend="Whether to prepend the standard sticky header",
-    timeout_minutes="How long the channel must stay idle before the sticky is reposted. Use 0 for immediate reposting."
+    timeout="How long the channel must stay idle before the sticky is reposted. Use 0, mm:ss, or hh:mm:ss."
 )
-async def create_sticky_message(ctx: discord.Interaction, content: str, prepend: bool = True, timeout_minutes: float = 0.0):
+async def create_sticky_message(ctx: discord.Interaction, content: str, prepend: bool = True, timeout: str = "0"):
     """
     Creates a sticky message in the current channel.
     Usage: !create_sticky_message <content>
@@ -908,8 +945,10 @@ async def create_sticky_message(ctx: discord.Interaction, content: str, prepend:
         await ctx.response.send_message("You do not have permission to use this command.")
         return
 
-    if timeout_minutes < 0:
-        await ctx.response.send_message("Timeout must be 0 or greater.", ephemeral=True)
+    try:
+        timeout_seconds = _parse_sticky_timeout(timeout)
+    except ValueError as exc:
+        await ctx.response.send_message(str(exc), ephemeral=True)
         return
 
     await ctx.response.send_message("Creating sticky message...", ephemeral=True)
@@ -938,7 +977,7 @@ async def create_sticky_message(ctx: discord.Interaction, content: str, prepend:
         {
             "content": stick_message,
             "message_id": message.id,
-            "timeout_seconds": timeout_minutes * 60,
+            "timeout_seconds": timeout_seconds,
         },
     )
 
