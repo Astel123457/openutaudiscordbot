@@ -306,7 +306,7 @@ async def on_message(message: discord.Message):
 
     if message.content.startswith(client.command_prefix):
         channel_id_str = str(message.channel.id)
-        command_cooldown_seconds = channel_command_cooldowns.get(channel_id_str, 0)
+        command_cooldown_seconds = channel_command_cooldowns.get(channel_id_str, 5) #default to 5 seconds of cooldown
         if command_cooldown_seconds > 0 and channel_last_command_time.get(channel_id_str) is not None:
             time_since_last_command = time.time() - channel_last_command_time[channel_id_str]
             if time_since_last_command < command_cooldown_seconds:
