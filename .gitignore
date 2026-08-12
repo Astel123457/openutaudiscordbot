@@ -9,3 +9,4 @@ pebble-python-config.json
 requirements.txt
 .gitlog.txt
 config.json
+__pycache__/bot.cpython-314.pyc

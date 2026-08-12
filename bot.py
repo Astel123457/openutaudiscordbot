@@ -44,12 +44,40 @@ if "sticky_messages" not in config:
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
 
+
+def _normalize_sticky_message_config(sticky_config):
+    if isinstance(sticky_config, dict):
+        content = sticky_config.get("content", "")
+        message_id = sticky_config.get("message_id")
+        timeout_seconds = sticky_config.get("timeout_seconds", 0.0)
+    else:
+        content = sticky_config[0] if len(sticky_config) > 0 else ""
+        message_id = sticky_config[1] if len(sticky_config) > 1 else None
+        timeout_seconds = sticky_config[2] if len(sticky_config) > 2 else 0.0
+
+    return {
+        "content": content,
+        "message_id": message_id,
+        "timeout_seconds": max(float(timeout_seconds), 0.0),
+    }
+
+
+def _save_sticky_message(channel_id_str: str, sticky_data: dict):
+    sticky_messages[channel_id_str] = sticky_data
+    config["sticky_messages"][channel_id_str] = sticky_data.copy()
+    with open("config.json", "w") as f:
+        json.dump(config, f, indent=4)
+
 # Stop flag for AI Chatbot
 stop_flag = {}
 command_list = []
 channel_based_message_history = {}
-sticky_messages = {k: tuple(v) for k, v in config.get("sticky_messages", {}).items()}
+sticky_messages = {
+    k: _normalize_sticky_message_config(v)
+    for k, v in config.get("sticky_messages", {}).items()
+}
 sticky_message_locks: dict[str, asyncio.Lock] = {}
+sticky_repost_tasks: dict[str, asyncio.Task] = {}
 sticky_last_message_time: dict[str, float] = {}
 
 default_system_prompt = "You are a helpful assistant specialized in assisting users with OpenUtau-related queries. Provide clear, concise, and accurate information to help users navigate and utilize OpenUtau effectively. Avoid long messages more than about 500 words. Avoid giving wrong information. If you don't know the answer, give an answer but warn the user that you are unsure about it, and ask the user to fact-check it. Avoid responding to users who are asking malicious or harmful questions, or are trolling. If you are unsure about the intent of a question, err on the side of caution and avoid answering it."
@@ -92,30 +120,55 @@ STOP_MESSAGES = [
 ]
 
 async def _do_sticky_repost(channel_id_str: str, channel: discord.TextChannel, trigger_time: float):
-    await asyncio.sleep(0.3)
-    # If a newer message arrived during our sleep, let that task handle the repost
-    if sticky_last_message_time.get(channel_id_str) != trigger_time:
+    current_task = asyncio.current_task()
+    sticky_data = sticky_messages.get(channel_id_str)
+    if sticky_data is None:
         return
-    if channel_id_str not in sticky_message_locks:
-        sticky_message_locks[channel_id_str] = asyncio.Lock()
-    async with sticky_message_locks[channel_id_str]:
-        if sticky_messages.get(channel_id_str) is None:
+
+    timeout_seconds = sticky_data.get("timeout_seconds", 0.0)
+
+    try:
+        await asyncio.sleep(timeout_seconds if timeout_seconds > 0 else 0.3)
+        # If a newer message arrived during our sleep, let that task handle the repost
+        if sticky_last_message_time.get(channel_id_str) != trigger_time:
             return
-        sticky_message, sticky_message_id = sticky_messages[channel_id_str]
-        try:
-            fetched = await channel.fetch_message(sticky_message_id)
-            await fetched.delete()
-            new_message = await channel.send(fetched.content)
-            sticky_messages[channel_id_str] = (fetched.content, new_message.id)
-            config["sticky_messages"][channel_id_str] = [fetched.content, new_message.id]
-            with open("config.json", "w") as f:
-                json.dump(config, f, indent=4)
-        except discord.NotFound:
-            new_message = await channel.send(sticky_message)
-            sticky_messages[channel_id_str] = (sticky_message, new_message.id)
-            config["sticky_messages"][channel_id_str] = [sticky_message, new_message.id]
-            with open("config.json", "w") as f:
-                json.dump(config, f, indent=4)
+        if channel_id_str not in sticky_message_locks:
+            sticky_message_locks[channel_id_str] = asyncio.Lock()
+        async with sticky_message_locks[channel_id_str]:
+            sticky_data = sticky_messages.get(channel_id_str)
+            if sticky_data is None:
+                return
+
+            sticky_message = sticky_data["content"]
+            sticky_message_id = sticky_data["message_id"]
+
+            try:
+                fetched = await channel.fetch_message(sticky_message_id)
+                await fetched.delete()
+                new_message = await channel.send(fetched.content)
+                _save_sticky_message(
+                    channel_id_str,
+                    {
+                        "content": fetched.content,
+                        "message_id": new_message.id,
+                        "timeout_seconds": sticky_data.get("timeout_seconds", 0.0),
+                    },
+                )
+            except discord.NotFound:
+                new_message = await channel.send(sticky_message)
+                _save_sticky_message(
+                    channel_id_str,
+                    {
+                        "content": sticky_message,
+                        "message_id": new_message.id,
+                        "timeout_seconds": sticky_data.get("timeout_seconds", 0.0),
+                    },
+                )
+    except asyncio.CancelledError:
+        return
+    finally:
+        if sticky_repost_tasks.get(channel_id_str) is current_task:
+            sticky_repost_tasks.pop(channel_id_str, None)
 
 # --- Bot Events ---
 @client.event
@@ -250,7 +303,12 @@ async def on_message(message: discord.Message):
     if sticky_messages.get(channel_id_str) is not None:
         now = time.monotonic()
         sticky_last_message_time[channel_id_str] = now
-        asyncio.ensure_future(_do_sticky_repost(channel_id_str, message.channel, now))
+        existing_task = sticky_repost_tasks.get(channel_id_str)
+        if existing_task is not None and not existing_task.done():
+            existing_task.cancel()
+        sticky_repost_tasks[channel_id_str] = asyncio.create_task(
+            _do_sticky_repost(channel_id_str, message.channel, now)
+        )
 
     # Handle bot mentions
     if client.user.mentioned_in(message):
@@ -836,13 +894,22 @@ async def send_config(interaction: discord.Interaction):
             )
 
 @client.tree.command(name="create-sticky-message", description="Creates a sticky message in the current channel.")
-async def create_sticky_message(ctx: discord.Interaction, content: str, prepend: bool = True):
+@app_commands.describe(
+    content="The message content to pin at the bottom of the channel",
+    prepend="Whether to prepend the standard sticky header",
+    timeout_minutes="How long the channel must stay idle before the sticky is reposted. Use 0 for immediate reposting."
+)
+async def create_sticky_message(ctx: discord.Interaction, content: str, prepend: bool = True, timeout_minutes: float = 0.0):
     """
     Creates a sticky message in the current channel.
     Usage: !create_sticky_message <content>
     """
     if ctx.user.id not in config.get("moderators", []):
         await ctx.response.send_message("You do not have permission to use this command.")
+        return
+
+    if timeout_minutes < 0:
+        await ctx.response.send_message("Timeout must be 0 or greater.", ephemeral=True)
         return
 
     await ctx.response.send_message("Creating sticky message...", ephemeral=True)
@@ -852,12 +919,28 @@ async def create_sticky_message(ctx: discord.Interaction, content: str, prepend:
 
     stick_message = f"{prepend_message}{content}"
 
+    channel_id = str(ctx.channel.id)
+    existing_sticky = sticky_messages.get(channel_id)
+    if existing_sticky is not None:
+        existing_task = sticky_repost_tasks.get(channel_id)
+        if existing_task is not None and not existing_task.done():
+            existing_task.cancel()
+        try:
+            existing_message = await ctx.channel.fetch_message(existing_sticky["message_id"])
+            await existing_message.delete()
+        except discord.NotFound:
+            pass
+
     message = await ctx.channel.send(stick_message)
 
-    sticky_messages[str(ctx.channel.id)] = (stick_message, message.id)
-    config["sticky_messages"][str(ctx.channel.id)] = [stick_message, message.id]
-    with open("config.json", "w") as f:
-        json.dump(config, f, indent=4)
+    _save_sticky_message(
+        channel_id,
+        {
+            "content": stick_message,
+            "message_id": message.id,
+            "timeout_seconds": timeout_minutes * 60,
+        },
+    )
 
 @client.tree.command(name="remove-sticky-message", description="Removes the sticky message from the current channel.")
 async def remove_sticky_message(ctx: discord.Interaction):
@@ -871,7 +954,10 @@ async def remove_sticky_message(ctx: discord.Interaction):
 
     channel_id = str(ctx.channel.id)
     if channel_id in sticky_messages:
-        _, message_id = sticky_messages[channel_id]
+        existing_task = sticky_repost_tasks.get(channel_id)
+        if existing_task is not None and not existing_task.done():
+            existing_task.cancel()
+        message_id = sticky_messages[channel_id]["message_id"]
         try:
             message = await ctx.channel.fetch_message(message_id)
             await message.delete()
