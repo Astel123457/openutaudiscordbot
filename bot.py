@@ -44,6 +44,12 @@ if "sticky_messages" not in config:
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
 
+# Ensure 'channel_command_cooldowns' key exists and load persisted data
+if "channel_command_cooldowns" not in config:
+    config["channel_command_cooldowns"] = {}
+    with open("config.json", "w") as f:
+        json.dump(config, f, indent=4)
+
 
 def _normalize_sticky_message_config(sticky_config):
     if isinstance(sticky_config, dict):
@@ -65,6 +71,18 @@ def _normalize_sticky_message_config(sticky_config):
 def _save_sticky_message(channel_id_str: str, sticky_data: dict):
     sticky_messages[channel_id_str] = sticky_data
     config["sticky_messages"][channel_id_str] = sticky_data.copy()
+    with open("config.json", "w") as f:
+        json.dump(config, f, indent=4)
+
+
+def _save_channel_command_cooldown(channel_id_str: str, cooldown_seconds: int):
+    if cooldown_seconds > 0:
+        channel_command_cooldowns[channel_id_str] = cooldown_seconds
+        config["channel_command_cooldowns"][channel_id_str] = cooldown_seconds
+    else:
+        channel_command_cooldowns.pop(channel_id_str, None)
+        config["channel_command_cooldowns"].pop(channel_id_str, None)
+
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
 
@@ -109,6 +127,11 @@ def _parse_sticky_timeout(timeout_value: str) -> float:
 stop_flag = {}
 command_list = []
 channel_based_message_history = {}
+channel_last_command_time = {}
+channel_command_cooldowns = {
+    str(channel_id): int(cooldown_seconds)
+    for channel_id, cooldown_seconds in config.get("channel_command_cooldowns", {}).items()
+}
 sticky_messages = {
     k: _normalize_sticky_message_config(v)
     for k, v in config.get("sticky_messages", {}).items()
@@ -282,6 +305,13 @@ async def on_message(message: discord.Message):
                     
 
     if message.content.startswith(client.command_prefix):
+        channel_id_str = str(message.channel.id)
+        command_cooldown_seconds = channel_command_cooldowns.get(channel_id_str, 0)
+        if command_cooldown_seconds > 0 and channel_last_command_time.get(channel_id_str) is not None:
+            time_since_last_command = time.time() - channel_last_command_time[channel_id_str]
+            if time_since_last_command < command_cooldown_seconds:
+                return
+        channel_last_command_time[channel_id_str] = time.time()
         command_name = message.content[len(client.command_prefix):].split()[0]
         
         #Don't intercept internal bot commands or config lists
@@ -468,6 +498,28 @@ async def set_image(ctx: discord.Interaction, command: str, image: discord.Attac
 
     update_command_list() 
     await ctx.response.send_message(f"The image for the command `{command}` has been set successfully!")
+
+@client.tree.command(name='cooldown', description='Add in a cooldown for commands to prevent spam.')
+async def cooldown(ctx: discord.Interaction, seconds: int):
+    """
+    Sets a cooldown for commands in the current channel.
+    Usage: !cooldown <seconds>
+    """
+    if ctx.user.id not in config.get("moderators", []):
+        await ctx.response.send_message("You do not have permission to use this command.")
+        return
+
+    if seconds < 0:
+        await ctx.response.send_message("Cooldown must be 0 or greater.")
+        return
+
+    channel_id_str = str(ctx.channel.id)
+    _save_channel_command_cooldown(channel_id_str, seconds)
+
+    if seconds == 0:
+        await ctx.response.send_message("Cooldown for this channel has been disabled.")
+    else:
+        await ctx.response.send_message(f"Cooldown for this channel has been set to {seconds} seconds.")
 
 @client.tree.command(name='system-prompt', description='commands.system-prompt.description')
 async def system_prompt(ctx: discord.Interaction, prompt: str = default_system_prompt):
