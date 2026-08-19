@@ -406,23 +406,6 @@ def autocorrect_command(command_name):
     combined_matches = list(dict.fromkeys(substring_matches + close_matches))
     return combined_matches
 
-async def command_autocompleter(
-    interaction: discord.Interaction,
-    current: str,
-) -> list[app_commands.Choice[str]]:
-    """Autocompletes custom command names for slash commands."""
-    global command_list
-    update_command_list()
-
-    choices = []
-    for command_name in command_list:
-        if current.lower() in command_name.lower():
-            choices.append(app_commands.Choice(name=command_name, value=command_name))
-    
-    # Sort by relevance
-    choices.sort(key=lambda c: c.name.lower().find(current.lower())) 
-    return choices[:25]
-
 @client.tree.command(name="stop", description="commands.stop.description")
 async def stop(ctx: discord.Interaction):
     """
@@ -470,69 +453,102 @@ async def send_temp_error(ctx: discord.Interaction, message_content: str, error_
             pass
 
 # --- Bot Commands ---
+class SetImageModal(ui.Modal, title='Set Command Image'):
+    command_name = ui.Label(text='Command name', component=ui.TextInput(placeholder='e.g. faq', max_length=100))
+    image = ui.Label(text='Image', component=ui.FileUpload(required=True, max_values=1))
+
+    async def on_submit(self, interaction: discord.Interaction):
+        command = self.command_name.component.value.strip()
+        attachment = self.image.component.values[0]
+
+        conf = config.get(command, None)
+        if conf is None:
+            # If command doesn't exist, create a basic entry for it
+            config[command] = {}
+            conf = config.get(command, None)
+
+        conf["has_image"] = True
+        _, file_extension = os.path.splitext(attachment.filename)
+        await attachment.save(command + file_extension)  # this is the image that is being sent
+        conf["image"] = command + file_extension
+
+        with open("config.json", "w") as f:
+            json.dump(config, f, indent=4)
+
+        update_command_list()
+        await interaction.response.send_message(f"The image for the command `{command}` has been set successfully!")
+
 @client.tree.command(name='set-image', description='commands.set-image.description')
-@app_commands.autocomplete(command=command_autocompleter)
-async def set_image(ctx: discord.Interaction, command: str, image: discord.Attachment):
+async def set_image(ctx: discord.Interaction):
     """
     Sets an image for a custom command.
     Requires moderator permissions.
-    Usage: !set_image <command_name> (attach image)
     """
     if ctx.user.id not in config["moderators"]:
-        await ctx.response.send_message("You do not have permission to use this command.")
+        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
 
-    conf = config.get(command, None)
-    if conf is None:
-        # If command doesn't exist, create a basic entry for it
-        config[command] = {}
-        conf = config.get(command, None)
+    await ctx.response.send_modal(SetImageModal())
 
-    conf["has_image"] = True
-    _, file_extension = os.path.splitext(image.filename)
-    await image.save(command + file_extension)  # this is the image that is being sent
-    conf["image"] = command + file_extension
+class CooldownModal(ui.Modal, title='Set Channel Cooldown'):
+    seconds = ui.Label(
+        text='Cooldown (seconds)',
+        description='0 disables the cooldown for this channel.',
+        component=ui.TextInput(placeholder='5', max_length=10),
+    )
 
-    with open("config.json", "w") as f:
-        json.dump(config, f, indent=4)
+    async def on_submit(self, interaction: discord.Interaction):
+        raw_seconds = self.seconds.component.value.strip()
+        try:
+            seconds = int(raw_seconds)
+        except ValueError:
+            await interaction.response.send_message("Cooldown must be a whole number of seconds.", ephemeral=True)
+            return
 
-    update_command_list() 
-    await ctx.response.send_message(f"The image for the command `{command}` has been set successfully!")
+        if seconds < 0:
+            await interaction.response.send_message("Cooldown must be 0 or greater.", ephemeral=True)
+            return
+
+        channel_id_str = str(interaction.channel.id)
+        _save_channel_command_cooldown(channel_id_str, seconds)
+
+        if seconds == 0:
+            await interaction.response.send_message("Cooldown for this channel has been disabled.")
+        else:
+            await interaction.response.send_message(f"Cooldown for this channel has been set to {seconds} seconds.")
 
 @client.tree.command(name='cooldown', description='Add in a cooldown for commands to prevent spam.')
-async def cooldown(ctx: discord.Interaction, seconds: int):
+async def cooldown(ctx: discord.Interaction):
     """
     Sets a cooldown for commands in the current channel.
-    Usage: !cooldown <seconds>
     """
     if ctx.user.id not in config.get("moderators", []):
-        await ctx.response.send_message("You do not have permission to use this command.")
+        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
 
-    if seconds < 0:
-        await ctx.response.send_message("Cooldown must be 0 or greater.")
-        return
+    await ctx.response.send_modal(CooldownModal())
 
-    channel_id_str = str(ctx.channel.id)
-    _save_channel_command_cooldown(channel_id_str, seconds)
+class SystemPromptModal(ui.Modal, title='Set AI System Prompt'):
+    prompt = ui.Label(
+        text='System prompt',
+        component=ui.TextInput(style=discord.TextStyle.paragraph, default=default_system_prompt, max_length=4000),
+    )
 
-    if seconds == 0:
-        await ctx.response.send_message("Cooldown for this channel has been disabled.")
-    else:
-        await ctx.response.send_message(f"Cooldown for this channel has been set to {seconds} seconds.")
+    async def on_submit(self, interaction: discord.Interaction):
+        prompt = self.prompt.component.value
+        channel_based_message_history[str(interaction.channel.id)] = [{"role": "system", "content": [{"type": "text", "text": prompt}]}]
+        await interaction.response.send_message("System prompt has been set successfully!")
 
 @client.tree.command(name='system-prompt', description='commands.system-prompt.description')
-async def system_prompt(ctx: discord.Interaction, prompt: str = default_system_prompt):
+async def system_prompt(ctx: discord.Interaction):
     """
     Sets the system prompt for the AI.
-    Usage: !system-prompt <prompt>
     """
     if ctx.user.id not in config.get("moderators", []):
-        await ctx.response.send_message("You do not have permission to use this command.")
+        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
 
-    channel_based_message_history[str(ctx.channel.id)] = [{"role": "system", "content": [{"type": "text", "text": prompt}]}]
-    await ctx.response.send_message(f"System prompt has been set successfully!")
+    await ctx.response.send_modal(SystemPromptModal())
 
 @client.tree.command(name='clear', description='commands.clear.description')
 async def clear(ctx: discord.Interaction):
@@ -583,121 +599,173 @@ async def end_finetuning(ctx: discord.Interaction):
     except Exception as e:
         await ctx.response.send_message(f"Failed to save chat history: {e}")
 
+class EditModal(ui.Modal, title='Edit Last AI Message'):
+    new_content = ui.Label(text='New content', component=ui.TextInput(style=discord.TextStyle.paragraph, max_length=2000))
+
+    async def on_submit(self, interaction: discord.Interaction):
+        new_content = self.new_content.component.value
+        channel_id = str(interaction.channel.id)
+        last_ai_message = None
+
+        # Find the last message sent by the bot in this channel
+        async for msg in interaction.channel.history(limit=50):
+            if msg.author == client.user:
+                last_ai_message = msg
+                break
+
+        if last_ai_message:
+            try:
+                await last_ai_message.edit(content=new_content)
+                # Update the last assistant message in channel_based_message_history
+                if channel_id in channel_based_message_history:
+                    # Find the last assistant message in the history (search backwards)
+                    for entry in reversed(channel_based_message_history[channel_id]):
+                        if entry.get("role") == "assistant":
+                            entry["content"] = [{"type": "text", "text": new_content}]
+                            break
+                # Save the updated message history to disk (optional: you can choose a filename per channel)
+                with open(f"history_{channel_id}.json", "w", encoding="utf-8") as f:
+                    json.dump(channel_based_message_history[channel_id], f, indent=4, ensure_ascii=False)
+                await interaction.response.send_message("The last AI message has been edited and the history has been updated.", ephemeral=True)
+            except Exception as e:
+                await interaction.response.send_message(f"Failed to edit the message: {e}", ephemeral=True)
+            return
+
+        await interaction.response.send_message("No recent AI message found to edit.", ephemeral=True)
+
 @client.tree.command(name='edit', description='commands.edit.description')
-@app_commands.describe(new_content="commands.edit.new_content")
-async def edit(ctx: discord.Interaction, *, new_content: str):
+async def edit(ctx: discord.Interaction):
     """
     Edits the last message the AI sent in the current channel and updates the channel_based_message_history.
-    Usage: !edit <new_content>
     """
     # Only allow moderators to use this command
     if ctx.user.id not in config.get("moderators", []):
-        await ctx.response.send_message("You do not have permission to use this command.")
+        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
 
-    channel_id = str(ctx.channel.id)
-    last_ai_message = None
+    await ctx.response.send_modal(EditModal())
 
-    # Find the last message sent by the bot in this channel
-    async for msg in ctx.channel.history(limit=50):
-        if msg.author == client.user:
-            last_ai_message = msg
-            break
+class SetInfoModal(ui.Modal, title='Set Command Info'):
+    command_name = ui.Label(text='Command name', component=ui.TextInput(placeholder='e.g. faq', max_length=100))
+    info = ui.Label(text='Info text', component=ui.TextInput(style=discord.TextStyle.paragraph, max_length=2000))
 
-    if last_ai_message:
-        try:
-            await last_ai_message.edit(content=new_content)
-            # Update the last assistant message in channel_based_message_history
-            if channel_id in channel_based_message_history:
-                # Find the last assistant message in the history (search backwards)
-                for entry in reversed(channel_based_message_history[channel_id]):
-                    if entry.get("role") == "assistant":
-                        entry["content"] = [{"type": "text", "text": new_content}]
-                        break
-            # Save the updated message history to disk (optional: you can choose a filename per channel)
-            with open(f"history_{channel_id}.json", "w", encoding="utf-8") as f:
-                json.dump(channel_based_message_history[channel_id], f, indent=4, ensure_ascii=False)
-            await ctx.followup.send("The last AI message has been edited and the history has been updated.")
-        except Exception as e:
-            await ctx.followup.send(f"Failed to edit the message: {e}")
-        return
+    async def on_submit(self, interaction: discord.Interaction):
+        command = self.command_name.component.value.strip()
+        info = self.info.component.value
 
-    await ctx.followup.send("No recent AI message found to edit.")
+        conf = config.get(command, None)
+        if conf is None:
+            await interaction.response.send_message(f"The command `{command}` does not exist. Use `/make-command` to create it first.", ephemeral=True)
+            return
+
+        conf["info"] = info
+
+        with open("config.json", "w") as f:
+            json.dump(config, f, indent=4)
+
+        update_command_list()
+        await interaction.response.send_message(f"The info for the command `{command}` has been set successfully!")
 
 @client.tree.command(name='set-info', description='commands.set-info.description')
-@app_commands.describe(command="commands.make-command.command", info="commands.set-info.info")
-@app_commands.autocomplete(command=command_autocompleter)
-async def set_info(ctx: discord.Interaction, command: str, info: str):
+async def set_info(ctx: discord.Interaction):
     """
     Sets the informational text for a custom command.
     Requires moderator permissions.
-    Usage: !set_info <command_name> <info_text>
     """
     if ctx.user.id not in config["moderators"]:
-        await ctx.response.send_message("You do not have permission to use this command.")
+        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
 
-    conf = config.get(command, None)
-    if conf is None:
-        await ctx.response.send_message(f"The command `{command}` does not exist. Use `/make_command` to create it first.")
-        return
+    await ctx.response.send_modal(SetInfoModal())
 
-    conf["info"] = info
+class MakeCommandModal(ui.Modal, title='Create a Custom Command'):
+    command_name = ui.Label(text='Command name', component=ui.TextInput(placeholder='e.g. faq', max_length=100))
+    info = ui.Label(
+        text='Info text',
+        description='The message sent when the command is used. Optional if an image is attached.',
+        component=ui.TextInput(style=discord.TextStyle.paragraph, required=False, max_length=2000),
+    )
+    image = ui.Label(
+        text='Image',
+        description='An image to send when the command is used. Optional if info text is set.',
+        component=ui.FileUpload(required=False, max_values=1),
+    )
 
-    with open("config.json", "w") as f:
-        json.dump(config, f, indent=4)
+    async def on_submit(self, interaction: discord.Interaction):
+        command = self.command_name.component.value.strip()
+        info = self.info.component.value.strip() or None
+        attachments = self.image.component.values
 
-    update_command_list()
-    await ctx.response.send_message(f"The info for the command `{command}` has been set successfully!")
+        if command in config:
+            await interaction.response.send_message(f"The command `{command}` already exists.", ephemeral=True)
+            return
+
+        has_image = bool(attachments)
+        if not has_image and not info:
+            await interaction.response.send_message("You must provide either an info message, an image, or both.", ephemeral=True)
+            return
+
+        config[command] = {"info": info, "has_image": has_image}
+
+        if has_image:
+            attachment = attachments[0]
+            _, file_extension = os.path.splitext(attachment.filename)
+            image_filename = command + file_extension
+            image_path = os.path.join("images", image_filename)
+            os.makedirs(os.path.dirname(image_path), exist_ok=True)
+            await attachment.save(image_path)
+            config[command]["image"] = image_path
+
+        with open("config.json", "w") as f:
+            json.dump(config, f, indent=4)
+
+        update_command_list()
+        await interaction.response.send_message(f"The command `{command}` has been created successfully!")
 
 @client.tree.command(name='make-command', description='commands.make-command.description')
-@app_commands.describe(
-    command="commands.make-command.command",
-    info="commands.make-command.info",
-    attachment="commands.make-command.attachment"
-)
-async def make_command(ctx: discord.Interaction, command: str, info: str = None, attachment: discord.Attachment = None):
+async def make_command(ctx: discord.Interaction):
     """
     Creates a new custom command.
     Requires moderator permissions.
-    Usage: !make_command <command_name> [info_text] (attach image)
     """
     if ctx.user.id not in config["moderators"]:
-        await ctx.response.send_message("You do not have permission to use this command.")
+        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
 
-    if command in config:
-        await ctx.response.send_message(f"The command `{command}` already exists.")
-        return
-    #why did i have to code it this way.
-    if attachment:
-        has_image = True
-    else: has_image = False
+    await ctx.response.send_modal(MakeCommandModal())
 
-    if not has_image and not info:
-        await ctx.response.send_message("You must provide either an info message, an image, or both.")
-        return
+class RemoveCommandModal(ui.Modal, title='Remove a Custom Command'):
+    command_name = ui.Label(text='Command name', component=ui.TextInput(placeholder='e.g. faq', max_length=100))
 
-    config[command] = {"info": info, "has_image": has_image}
+    async def on_submit(self, interaction: discord.Interaction):
+        command = self.command_name.component.value.strip()
 
-    if has_image:
-        _, file_extension = os.path.splitext(attachment.filename)
-        image_filename = command + file_extension
-        image_path = os.path.join("images", image_filename)
-        os.makedirs(os.path.dirname(image_path), exist_ok=True)
-        await attachment.save(image_path)
-        config[command]["image"] = image_path
+        if command not in config:
+            await interaction.response.send_message(f"The command `{command}` does not exist.", ephemeral=True)
+            return
 
-    with open("config.json", "w") as f:
-        json.dump(config, f, indent=4)
+        await interaction.response.defer(ephemeral=True)
+        removed_command_data = config.pop(command)
 
-    update_command_list()
-    await ctx.response.send_message(f"The command `{command}` has been created successfully!")
+        # If the command had an associated image, delete the file
+        if removed_command_data.get("has_image") and "image" in removed_command_data:
+            image_path = removed_command_data["image"]
+            if os.path.exists(image_path):
+                try:
+                    os.remove(image_path)
+                    print(f"Removed image file: {image_path}")
+                except OSError as e:
+                    print(f"Error removing image file {image_path}: {e}")
+                    await interaction.followup.send(f"Warning: Failed to delete associated image file: {e}", ephemeral=True)
+
+        with open("config.json", "w") as f:
+            json.dump(config, f, indent=4)
+
+        update_command_list()
+        await interaction.followup.send(f"The command `{command}` has been removed successfully!", ephemeral=True)
 
 @client.tree.command(name='remove-command', description='commands.remove-command.description')
-@app_commands.describe(command="commands.remove-command.command")
-@app_commands.autocomplete(command=command_autocompleter)
-async def remove_command(ctx: discord.Interaction, command: str): 
+async def remove_command(ctx: discord.Interaction):
     """
     Deletes an existing custom command.
     Requires moderator permissions.
@@ -705,29 +773,8 @@ async def remove_command(ctx: discord.Interaction, command: str):
     if ctx.user.id not in config["moderators"]:
         await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
-    if command not in config:
-        await ctx.response.send_message(f"The command `{command}` does not exist.", ephemeral=True)
-        return
 
-    await ctx.response.defer(ephemeral=True)
-    removed_command_data = config.pop(command)
-
-    # If the command had an associated image, delete the file
-    if removed_command_data.get("has_image") and "image" in removed_command_data:
-        image_path = removed_command_data["image"]
-        if os.path.exists(image_path):
-            try:
-                os.remove(image_path)
-                print(f"Removed image file: {image_path}")
-            except OSError as e:
-                print(f"Error removing image file {image_path}: {e}")
-                await ctx.followup.send(f"Warning: Failed to delete associated image file: {e}", ephemeral=True)
-
-    with open("config.json", "w") as f:
-        json.dump(config, f, indent=4)
-
-    update_command_list()
-    await ctx.followup.send(f"The command `{command}` has been removed successfully!", ephemeral=True)
+    await ctx.response.send_modal(RemoveCommandModal())
 
 @client.tree.command(name='add-bot-moderator', description='Adds a user as a bot moderator.')
 @app_commands.describe(user="The user to add as a moderator")
@@ -781,55 +828,58 @@ async def moderators(ctx: discord.Interaction):
         )
         await ctx.response.send_message(embed=embed)
 
+class RenameCommandModal(ui.Modal, title='Rename a Custom Command'):
+    old_name = ui.Label(text='Current name', component=ui.TextInput(placeholder='e.g. faq', max_length=100))
+    new_name = ui.Label(text='New name', component=ui.TextInput(placeholder='e.g. faq-v2', max_length=100))
+
+    async def on_submit(self, interaction: discord.Interaction):
+        old_name = self.old_name.component.value.strip()
+        new_name = self.new_name.component.value.strip()
+
+        if old_name not in config:
+            await interaction.response.send_message(f"The command `{old_name}` does not exist.", ephemeral=True)
+            return
+
+        if new_name in config:
+            await interaction.response.send_message(f"The command `{new_name}` already exists.", ephemeral=True)
+            return
+
+        config[new_name] = config.pop(old_name)
+
+        if config[new_name].get("has_image") and "image" in config[new_name]:
+            old_image_path = config[new_name]["image"]
+            old_image_filename = os.path.basename(old_image_path)
+            old_image_ext = os.path.splitext(old_image_filename)[1]
+            new_image_filename = new_name + old_image_ext
+            new_image_path = os.path.join("images", new_image_filename)
+
+            if os.path.exists(old_image_path):
+                try:
+                    os.rename(old_image_path, new_image_path)
+                    config[new_name]["image"] = new_image_path
+                    print(f"Renamed image from {old_image_path} to {new_image_path}")
+                except OSError as e:
+                    print(f"Error renaming image file {old_image_path} to {new_image_path}: {e}")
+            else:
+                print(f"Old image path not found for renaming: {old_image_path}")
+
+        with open("config.json", "w") as f:
+            json.dump(config, f, indent=4)
+
+        update_command_list()
+        await interaction.response.send_message(f"The command `{old_name}` has been renamed to `{new_name}` successfully!")
+
 @client.tree.command(name='rename-command', description='Renames an existing custom command.')
-@app_commands.rename(old_name="old-command", new_name="new-command")
-@app_commands.describe(
-    old_name="The current name of the command to rename",
-    new_name="The new name for the command"
-)
-async def rename_command(ctx: discord.Interaction, old_name: str, new_name: str): 
+async def rename_command(ctx: discord.Interaction):
     """
     Renames an existing custom command.
     Requires moderator permissions.
-    Usage: !rename_command <old_name> <new_name>
     """
     if ctx.user.id not in config["moderators"]:
-        await ctx.response.send_message("You do not have permission to use this command.")
+        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
 
-    if old_name not in config:
-        await ctx.response.send_message(f"The command `{old_name}` does not exist.")
-        return
-
-    if new_name in config:
-        await ctx.response.send_message(f"The command `{new_name}` already exists.")
-        return
-
-    config[new_name] = config.pop(old_name)
-
-    if config[new_name].get("has_image") and "image" in config[new_name]:
-        old_image_path = config[new_name]["image"]
-        old_image_filename = os.path.basename(old_image_path)
-        old_image_ext = os.path.splitext(old_image_filename)[1]
-        new_image_filename = new_name + old_image_ext
-        new_image_path = os.path.join("images", new_image_filename)
-
-        if os.path.exists(old_image_path):
-            try:
-                os.rename(old_image_path, new_image_path)
-                config[new_name]["image"] = new_image_path
-                print(f"Renamed image from {old_image_path} to {new_image_path}")
-            except OSError as e:
-                print(f"Error renaming image file {old_image_path} to {new_image_path}: {e}")
-        else:
-            print(f"Old image path not found for renaming: {old_image_path}")
-
-
-    with open("config.json", "w") as f:
-        json.dump(config, f, indent=4)
-
-    update_command_list()
-    await ctx.response.send_message(f"The command `{old_name}` has been renamed to `{new_name}` successfully!")
+    await ctx.response.send_modal(RenameCommandModal())
 
 class CommandPaginator(ui.View):
     def __init__(self, interaction: Interaction, command_pages, embed_color, embed_title_prefix, no_results_message, ephemeral: bool):
@@ -982,56 +1032,64 @@ async def send_config(interaction: discord.Interaction):
                 ephemeral=True
             )
 
+class CreateStickyMessageModal(ui.Modal, title='Create Sticky Message'):
+    content = ui.Label(text='Content', component=ui.TextInput(style=discord.TextStyle.paragraph, max_length=2000))
+    timeout = ui.Label(
+        text='Repost timeout',
+        description='How long the channel must stay idle before the sticky is reposted. Use 0, mm:ss, or hh:mm:ss.',
+        component=ui.TextInput(default='0', required=False, max_length=20),
+    )
+
+    def __init__(self, prepend: bool):
+        super().__init__()
+        self.prepend = prepend
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            timeout_seconds = _parse_sticky_timeout(self.timeout.component.value or "0")
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+
+        await interaction.response.send_message("Creating sticky message...", ephemeral=True)
+
+        prepend_message = "__**Stickied Message:**__\n\n" if self.prepend else ""
+        stick_message = f"{prepend_message}{self.content.component.value}"
+
+        channel_id = str(interaction.channel.id)
+        existing_sticky = sticky_messages.get(channel_id)
+        if existing_sticky is not None:
+            existing_task = sticky_repost_tasks.get(channel_id)
+            if existing_task is not None and not existing_task.done():
+                existing_task.cancel()
+            try:
+                existing_message = await interaction.channel.fetch_message(existing_sticky["message_id"])
+                await existing_message.delete()
+            except discord.NotFound:
+                pass
+
+        message = await interaction.channel.send(stick_message)
+
+        _save_sticky_message(
+            channel_id,
+            {
+                "content": stick_message,
+                "message_id": message.id,
+                "timeout_seconds": timeout_seconds,
+            },
+        )
+
 @client.tree.command(name="create-sticky-message", description="Creates a sticky message in the current channel.")
-@app_commands.describe(
-    content="The message content to pin at the bottom of the channel",
-    prepend="Whether to prepend the standard sticky header",
-    timeout="How long the channel must stay idle before the sticky is reposted. Use 0, mm:ss, or hh:mm:ss."
-)
-async def create_sticky_message(ctx: discord.Interaction, content: str, prepend: bool = True, timeout: str = "0"):
+@app_commands.describe(prepend="Whether to prepend the standard sticky header")
+async def create_sticky_message(ctx: discord.Interaction, prepend: bool = True):
     """
     Creates a sticky message in the current channel.
-    Usage: !create_sticky_message <content>
     """
     if ctx.user.id not in config.get("moderators", []):
-        await ctx.response.send_message("You do not have permission to use this command.")
+        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
 
-    try:
-        timeout_seconds = _parse_sticky_timeout(timeout)
-    except ValueError as exc:
-        await ctx.response.send_message(str(exc), ephemeral=True)
-        return
-
-    await ctx.response.send_message("Creating sticky message...", ephemeral=True)
-
-    if prepend: prepend_message = "__**Stickied Message:**__\n\n"
-    else: prepend_message = ""
-
-    stick_message = f"{prepend_message}{content}"
-
-    channel_id = str(ctx.channel.id)
-    existing_sticky = sticky_messages.get(channel_id)
-    if existing_sticky is not None:
-        existing_task = sticky_repost_tasks.get(channel_id)
-        if existing_task is not None and not existing_task.done():
-            existing_task.cancel()
-        try:
-            existing_message = await ctx.channel.fetch_message(existing_sticky["message_id"])
-            await existing_message.delete()
-        except discord.NotFound:
-            pass
-
-    message = await ctx.channel.send(stick_message)
-
-    _save_sticky_message(
-        channel_id,
-        {
-            "content": stick_message,
-            "message_id": message.id,
-            "timeout_seconds": timeout_seconds,
-        },
-    )
+    await ctx.response.send_modal(CreateStickyMessageModal(prepend))
 
 @client.tree.command(name="remove-sticky-message", description="Removes the sticky message from the current channel.")
 async def remove_sticky_message(ctx: discord.Interaction):
