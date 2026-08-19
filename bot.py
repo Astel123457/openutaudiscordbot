@@ -6,7 +6,7 @@ import asyncio
 from difflib import get_close_matches
 import os
 import json
-from mistralai import Mistral
+from mistralai.client import Mistral
 import secretsd as sec #TODO: switch to using environment variables or a more secure method for storing sensitive information
 import time
 from datetime import datetime
