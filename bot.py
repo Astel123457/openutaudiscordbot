@@ -1034,7 +1034,7 @@ async def send_config(interaction: discord.Interaction):
 
 class CreateStickyMessageModal(ui.Modal, title='Create Sticky Message'):
     content = ui.Label(text='Content', component=ui.TextInput(style=discord.TextStyle.paragraph, max_length=2000))
-    timeout = ui.Label(
+    repost_timeout = ui.Label(
         text='Repost timeout',
         description='How long the channel must stay idle before the sticky is reposted. Use 0, mm:ss, or hh:mm:ss.',
         component=ui.TextInput(default='0', required=False, max_length=20),
@@ -1046,7 +1046,7 @@ class CreateStickyMessageModal(ui.Modal, title='Create Sticky Message'):
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            timeout_seconds = _parse_sticky_timeout(self.timeout.component.value or "0")
+            timeout_seconds = _parse_sticky_timeout(self.repost_timeout.component.value or "0")
         except ValueError as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
