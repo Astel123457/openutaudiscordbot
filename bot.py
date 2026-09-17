@@ -237,6 +237,13 @@ async def on_ready():
     print(f"Logged in as {client.user.name}")
     print(f"Bot ID: {client.user.id}")
     print("Client has started")
+
+@client.command()
+async def listservers(ctx):
+    if ctx.user.id not in config("moderators"):
+        return
+    server_list = "\n".join([f"{g.name} ({g.id})" for g in client.guilds])
+    await ctx.send(f"I am in these servers:\n{server_list}")
     
 @client.event
 async def on_message(message: discord.Message):
