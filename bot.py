@@ -240,7 +240,7 @@ async def on_ready():
 
 @client.command()
 async def listservers(ctx):
-    if ctx.user.id not in config("moderators"):
+    if ctx.author.id not in config("moderators"):
         return
     server_list = "\n".join([f"{g.name} ({g.id})" for g in client.guilds])
     await ctx.send(f"I am in these servers:\n{server_list}")
