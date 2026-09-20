@@ -131,6 +131,7 @@ class Tests(unittest.IsolatedAsyncioTestCase):
              event({}, 'tool_calls')],
             [event({'tool_calls': [call(0, 'read_wiki_page', '{"page":"Install"}', 'abcdef789')]}),
              event({}, 'tool_calls')],
+            [event({}, 'stop')],
             [event({'content': 'Use !install. ' + 'Helpful wiki answer. ' * 200}), event({}, 'stop')]])
         tools = HelpTools(lambda: {'install': {'info': 'Install OpenUtau'}}, [])
         tools.fetch = AsyncMock(return_value='<a href="/openutau/OpenUtau/wiki/Install">Install</a>')
@@ -144,8 +145,31 @@ class Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exchange[3]['tool_call_id'], 'abcdef123')
         self.assertIn('!install', exchange[3]['content'])
         self.assertEqual(history[-1]['content'], channel.text())
-        self.assertEqual(len(chat.requests), 3)
+        self.assertEqual(len(chat.requests), 4)
         self.assertTrue(all(r.is_closed for r in chat.responses))
+
+    async def test_lookup_prose_and_simulated_calls_never_reach_discord(self):
+        narration = 'I will search now. search_wiki("close tips menu") No results found.'
+        for actual_call in (True, False):
+            with self.subTest(actual_call=actual_call):
+                lookup = [event({'content': narration})]
+                if actual_call:
+                    lookup += [event({'tool_calls': [call(0, 'search_commands', '{"query":"tips"}', 'abcdef123')]}),
+                               event({}, 'tool_calls')]
+                    rounds = [lookup, [event({}, 'stop')]]
+                else:
+                    rounds = [lookup + [event({}, 'stop')]]
+                rounds.append([event({'content': 'The available sources do not explain this control.'}), event({}, 'stop')])
+                chat = Chat(rounds)
+                channel = Channel()
+                reply = DiscordReply(channel)
+                await reply.start()
+                history = [{'role': 'system', 'content': 'Help'}, {'role': 'user', 'content': 'Close tips?'}]
+                await stream_answer(SimpleNamespace(chat=chat), history, reply, HelpTools(lambda: {}, []), lambda: False)
+                self.assertEqual(channel.text(), 'The available sources do not explain this control.')
+                self.assertEqual(chat.requests[-1]['tool_choice'], 'none')
+                self.assertNotIn(narration, json.dumps(chat.requests[-1]['messages']))
+                self.assertNotIn(narration, json.dumps(history))
 
     async def test_tool_round_limit_and_empty_answer(self):
         rounds = [[event({'tool_calls': [call(0, 'search_commands', '{"query":""}', 'abcdef123')]}),
@@ -165,7 +189,7 @@ class Tests(unittest.IsolatedAsyncioTestCase):
             reply = DiscordReply(channel)
             await reply.start()
             history = [{'role': 'system', 'content': 'Help'}]
-            chat = Chat([[event({'content': 'answer ' * 400})]])
+            chat = Chat([[event({}, 'stop')], [event({'content': 'answer ' * 400})]])
             if stop:
                 await stream_answer(SimpleNamespace(chat=chat), history, reply, HelpTools(lambda: {}, []),
                                     lambda: bool(reply.full_text))

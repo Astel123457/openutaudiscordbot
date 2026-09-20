@@ -9,7 +9,11 @@ The AI can now call three read-only tools:
 
 Wiki responses are cached for five minutes. Requests time out after 15 seconds;
 lookup errors are returned to the model. Four tool rounds are allowed before a
-final answer without tools. Streamed function-call fragments are assembled before
+final answer without tools. Lookup-phase prose is kept out of Discord and conversation
+history, including text that imitates function calls. The final answer is generated
+in a separate request with tools disabled and streams to Discord normally. This
+adds a final-answer request even when the lookup phase does not call a tool.
+Streamed function-call fragments are assembled before
 execution, and results are returned with the corresponding `tool_call_id`, following
 [Mistral's function-calling documentation](https://docs.mistral.ai/studio/conversations/function-calling).
 
