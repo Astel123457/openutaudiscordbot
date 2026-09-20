@@ -14,6 +14,7 @@ from translations import MyTranslator # Import the custom translator class
 from textwrap import wrap
 import random
 import uuid
+from ai_support import DiscordReply, HelpTools, stream_answer
 
 # --- Configuration and Initialization ---
 token = sec.discord_token
@@ -164,6 +165,8 @@ def update_command_list():
     command_list.sort()
 
 update_command_list()
+help_tools = HelpTools(lambda: config, INTERNAL_COMMANDS)
+ai_channel_locks = {}
 
 client = commands.Bot(command_prefix='!', intents=intents, status=discord.Status.online,
                       activity=discord.Activity(type=discord.ActivityType.custom, name="Use !help or ping me!"))
@@ -252,64 +255,40 @@ async def on_message(message: discord.Message):
         return
     
     starts_with_prefix = message.content.startswith('=')
-    last_sent = time.time()
     if starts_with_prefix:
         if not message.author.id in config.get("moderators", []):
             return
         prompt = message.content[1:].strip()
         #Get the channel ID to use as a key for message history
         channel_id = str(message.channel.id)
-        if channel_id not in channel_based_message_history:
-            channel_based_message_history[channel_id] = [{"role": "system", "content": [{"type": "text", "text": default_system_prompt}]}]
-        # Append the new message to the channel's history
-        mess = {"role": "user", "content": [ {"type": "text", "text": prompt}]}
-        if message.attachments:
-            for attachment in message.attachments:
-                if attachment.filename.endswith(('.png', '.jpg', '.jpeg', '.webp')):
-                    mess["content"].append({"type": "image_url", "image_url": attachment.url})
-                if attachment.filename.endswith((".txt", ".py", ".json", ".md")): # we can add more file types here if needed
-                    attachment_content = str(await attachment.read())
-                    mess["content"].append({"type": "text", "text": f"Attached file: {attachment_content}"})
-        channel_based_message_history[channel_id].append(mess)
-        full_output = "" # we use this to store the full output from the model, then we'll append this to the channel history
-        current_message_content = "" #we will erase the content in this if the output is too long
-        stop_flag[channel_id] = False # Clear the stop flag on new response
-        async with message.channel.typing():
-            main_message = await message.channel.send("...")
-            response = await mistral_client.chat.stream_async(
-            messages=channel_based_message_history[channel_id],\
-            #TODO: use a custom fine-tuned model specific to OpenUtau, once trained
-            model="mistral-medium-latest",
-            temperature=0.7,
-            safe_prompt=True,
-            max_tokens=1000,
-            top_p=0.95,
-            )
-            async for chunk in response:
-                if chunk.data.choices[0].delta.content:
-                    full_output += chunk.data.choices[0].delta.content
-                    if len(current_message_content) + 3 > 2000:
-                        current_message_content = chunk.data.choices[0].delta.content
-                        main_message = await message.channel.send("...")
-                    else:
-                        current_message_content += chunk.data.choices[0].delta.content
-                if chunk.data.choices[0].finish_reason != None:
-                    await main_message.edit(content=current_message_content)
-                    # Append the full output to the channel's history
-                    channel_based_message_history[channel_id].append({"role": "assistant", "content": [{"type": "text", "text": full_output}]})
-                    break
-                if stop_flag.get(channel_id, False):
+        async with ai_channel_locks.setdefault(channel_id, asyncio.Lock()):
+            if channel_id not in channel_based_message_history:
+                channel_based_message_history[channel_id] = [{"role": "system", "content": [{"type": "text", "text": default_system_prompt}]}]
+            # Append the new message to the channel's history
+            mess = {"role": "user", "content": [ {"type": "text", "text": prompt}]}
+            if message.attachments:
+                for attachment in message.attachments:
+                    if attachment.filename.endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                        mess["content"].append({"type": "image_url", "image_url": attachment.url})
+                    if attachment.filename.endswith((".txt", ".py", ".json", ".md")): # we can add more file types here if needed
+                        attachment_content = str(await attachment.read())
+                        mess["content"].append({"type": "text", "text": f"Attached file: {attachment_content}"})
+            channel_based_message_history[channel_id].append(mess)
+            stop_flag[channel_id] = False
+            async with message.channel.typing():
+                reply = DiscordReply(message.channel)
+                await reply.start()
+                try:
+                    await stream_answer(
+                        mistral_client, channel_based_message_history[channel_id],
+                        reply, help_tools, lambda: stop_flag.get(channel_id, False),
+                    )
+                except Exception as exc:
+                    print(f"AI response failed: {type(exc).__name__}: {exc}")
+                    await message.channel.send("The AI request failed. Please try again.")
+                finally:
                     stop_flag[channel_id] = False
-                    await main_message.edit(content=current_message_content + "-- (AI was Stopped by command)")
-                    channel_based_message_history[channel_id].append({"role": "assistant", "content": [{"type": "text", "text": full_output + "-- (AI was Stopped by command)"}]})
-                    break
-                time_delta = last_sent - time.time()
-                if abs(time_delta) < 0.9:
-                    continue #restart the loop if it's not been about .9 seconds since the last message was sent/edited, to avoid rate limiting
-                else:
-                    last_sent = time.time()
-                    await main_message.edit(content=current_message_content+"...")
-                    
+
 
     if message.content.startswith(client.command_prefix):
         channel_id_str = str(message.channel.id)
