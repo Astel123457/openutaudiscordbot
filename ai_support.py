@@ -174,7 +174,7 @@ async def stream_answer(client, history, reply, help_tools, stopped):
             if stopped():
                 break
             response = await client.chat.stream_async(
-                messages=messages, model="mistral-medium-latest", temperature=0.7,
+                messages=messages, model="mistral-large-latest", temperature=0.5,
                 safe_prompt=False, max_tokens=1000, top_p=0.95,
                 tools=TOOLS, tool_choice="auto" if round_number < 4 else "none")
             calls = {}
