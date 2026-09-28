@@ -1,0 +1,17 @@
+# https://crowdin.com/project/openutaudiscordbot
+project_id: "934405"
+api_token_env: CROWDIN_PERSONAL_TOKEN
+base_path: .
+preserve_hierarchy: true
+files:
+  - source: /translations/en.json
+    translation: /translations/%locale%/%original_file_name%
+    languages_mapping:
+      locale:
+        ja: ja
+    # Explicit destinations keep released catalogs separate from downloads.
+  - source: /translations/custom/en.json
+    translation: /translations/custom/%locale%/%original_file_name%
+    languages_mapping:
+      locale:
+        ja: ja

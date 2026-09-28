@@ -10,3 +10,9 @@ requirements.txt
 .gitlog.txt
 config.json
 __pycache__/bot.cpython-314.pyc
+
+# Generated custom-command sources and translations belong to each bot deployment.
+translations/custom/
+
+__pycache__/
+*.pyc

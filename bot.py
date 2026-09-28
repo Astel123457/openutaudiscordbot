@@ -10,11 +10,14 @@ from mistralai.client import Mistral
 import secretsd as sec #TODO: switch to using environment variables or a more secure method for storing sensitive information
 import time
 from datetime import datetime
-from translations import MyTranslator # Import the custom translator class
+from translations import MyTranslator, localized
+from localization import catalog, custom_commands, export_custom, LANGUAGES
 from textwrap import wrap
 import random
 import uuid
+import hashlib
 from ai_support import DiscordReply, HelpTools, stream_answer
+from changelog import register_changelog
 
 # --- Configuration and Initialization ---
 token = sec.discord_token
@@ -124,6 +127,34 @@ def _parse_sticky_timeout(timeout_value: str) -> float:
 
     return float(hours * 3600 + minutes * 60 + seconds)
 
+def response_locale(context):
+    if isinstance(context, discord.Interaction):
+        return context.locale
+    return config.get("channel_languages", {}).get(str(context.channel.id), "en-US")
+
+
+def tr(context, key, **values):
+    return catalog.text(key, response_locale(context), **values)
+
+
+def localize_modal(modal, interaction):
+    def translate(value, limit):
+        if not value:
+            return value
+        key = "ui." + hashlib.sha256(value.encode()).hexdigest()[:12]
+        result = catalog.text(key, interaction.locale)
+        return result if key in catalog.english and len(result) <= limit else value
+
+    modal.title = translate(modal.title, 45)
+    for item in modal.walk_children():
+        for attribute, limit in (("text", 45), ("description", 100), ("placeholder", 100)):
+            if hasattr(item, attribute):
+                value = getattr(item, attribute)
+                if isinstance(value, str):
+                    setattr(item, attribute, translate(value, limit))
+    return modal
+
+
 # Stop flag for AI Chatbot
 stop_flag = {}
 command_list = []
@@ -149,7 +180,7 @@ INTERNAL_COMMANDS = ["make_command", "set_info", "set_image", "moderators",
                          "list_commands", "bot_config", "bot_commands", "edit",
                          "clear", "start_finetuning", "end_finetuning", "import_config",
                          "make_stickynote", "list_stickynote", "remove_stickynote", "stickynote",
-                         "stop"]
+                         "stop", "channel_languages", "sticky_messages", "channel_command_cooldowns"]
 
 def update_command_list():
     """Updates the global command_list from the current config."""
@@ -161,7 +192,8 @@ def update_command_list():
         config.update(json.load(f))
 
     command_list.clear()
-    command_list.extend([cmd for cmd in config.keys() if cmd not in INTERNAL_COMMANDS])
+    command_list.extend(custom_commands(config))
+    export_custom(config)
     command_list.sort()
 
 update_command_list()
@@ -171,6 +203,7 @@ ai_channel_locks = {}
 client = commands.Bot(command_prefix='!', intents=intents, status=discord.Status.online,
                       activity=discord.Activity(type=discord.ActivityType.custom, name="Use !help or ping me!"))
 client.remove_command("help")
+register_changelog(client.tree)
 
 # List of random messages for the !stop command
 STOP_MESSAGES = [
@@ -246,7 +279,7 @@ async def listservers(ctx):
     if ctx.author.id not in config["moderators"]:
         return
     server_list = "\n".join([f"{g.name} ({g.id})" for g in client.guilds])
-    await ctx.send(f"I am in these servers:\n{server_list}")
+    await ctx.send(tr(ctx, 'messages.fc3846b9e177', value0=server_list))
     
 @client.event
 async def on_message(message: discord.Message):
@@ -285,7 +318,7 @@ async def on_message(message: discord.Message):
                     )
                 except Exception as exc:
                     print(f"AI response failed: {type(exc).__name__}: {exc}")
-                    await message.channel.send("The AI request failed. Please try again.")
+                    await message.channel.send(tr(message, 'messages.5dacd09e1d71'))
                 finally:
                     stop_flag[channel_id] = False
 
@@ -298,30 +331,36 @@ async def on_message(message: discord.Message):
             if time_since_last_command < command_cooldown_seconds:
                 return
         channel_last_command_time[channel_id_str] = time.time()
-        command_name = message.content[len(client.command_prefix):].split()[0]
+        command_parts = message.content[len(client.command_prefix):].split()
+        if not command_parts:
+            return
+        command_name = command_parts[0]
+        language = config.get("channel_languages", {}).get(channel_id_str, "en-US")
+        aliases = catalog.aliases(config, language, reserved=client.all_commands)
+        command_name = aliases.get(command_name, command_name)
         
         #Don't intercept internal bot commands or config lists
-        if command_name not in INTERNAL_COMMANDS and command_name not in ["moderators", "stickynotes"]:
+        if command_name not in INTERNAL_COMMANDS and command_name not in client.all_commands:
             
             matched_command = None
             norm_target = command_name.lower().replace("-", "").replace("_", "")
-            custom_commands = [k for k in config.keys() if k not in INTERNAL_COMMANDS and k not in ["moderators", "stickynotes"]]
+            available_commands = list(custom_commands(config))
             
             #Check for exact match
-            if command_name in custom_commands:
+            if command_name in available_commands:
                 matched_command = command_name
             else:
                 #Check for normalized match (handles !off-topic, !offtopic, !Offtopic)
-                for key in custom_commands:
+                for key in available_commands:
                     if key.lower().replace("-", "").replace("_", "") == norm_target:
                         matched_command = key
                         break
                 
                 #Check for fuzzy match (handles slight typos like !of-topic)
                 if not matched_command:
-                    matches = get_close_matches(command_name.lower(), [k.lower() for k in custom_commands], n=1, cutoff=0.8)
+                    matches = get_close_matches(command_name.lower(), [k.lower() for k in available_commands], n=1, cutoff=0.8)
                     if matches:
-                        for k in custom_commands:
+                        for k in available_commands:
                             if k.lower() == matches[0]:
                                 matched_command = k
                                 break
@@ -330,7 +369,7 @@ async def on_message(message: discord.Message):
                 conf = config.get(matched_command)
                 
                 if isinstance(conf, dict): 
-                    info = conf.get("info", None)
+                    info = catalog.custom_text(matched_command, "info", conf.get("info"), language)
                     has_image = conf.get("has_image", False)
 
                     if has_image:
@@ -365,10 +404,10 @@ async def on_message(message: discord.Message):
 
     # Handle bot mentions
     if client.user.mentioned_in(message):
-        embed = discord.Embed(title="Hello!", description="This Bot is used to help the users of the Openutau discord server.\nIf you would like some help, check out one of the links below.", color=0x00ff00)
-        embed.add_field(name="Getting Started", value="https://github.com/stakira/OpenUtau/wiki/Getting-Started", inline=False)
-        embed.add_field(name="Frequently Asked Questions", value="https://github.com/stakira/OpenUtau/wiki/FAQ", inline=False)
-        embed.add_field(name="Have issues? Send them here! (Or in #help-en)", value="https://github.com/stakira/OpenUtau/issues", inline=False)
+        embed = discord.Embed(title=tr(message, 'messages.334d016f755c'), description=tr(message, 'messages.2f99eb3b5d52'), color=0x00ff00)
+        embed.add_field(name=tr(message, 'messages.d00eca1bae67'), value="https://github.com/stakira/OpenUtau/wiki/Getting-Started", inline=False)
+        embed.add_field(name=tr(message, 'messages.a3d458e1bd1e'), value="https://github.com/stakira/OpenUtau/wiki/FAQ", inline=False)
+        embed.add_field(name=tr(message, 'messages.8af0036c3a79'), value="https://github.com/stakira/OpenUtau/issues", inline=False)
         await message.channel.send(embed=embed)
     await client.process_commands(message)
 
@@ -392,7 +431,7 @@ def autocorrect_command(command_name):
     combined_matches = list(dict.fromkeys(substring_matches + close_matches))
     return combined_matches
 
-@client.tree.command(name="stop", description="commands.stop.description")
+@client.tree.command(name=localized('stop'), description=localized('commands.stop.description'))
 async def stop(ctx: discord.Interaction):
     """
     Stops the current AI conversation
@@ -406,10 +445,10 @@ async def stop(ctx: discord.Interaction):
         # Select a random message from the predefined list
         response_message = random.choice(STOP_MESSAGES)
         stop_flag[channel_id] = True
-        await ctx.response.send_message(response_message)
+        await ctx.response.send_message(tr(ctx, "messages." + hashlib.sha256(response_message.encode()).hexdigest()[:12]))
         print(f"AI chat for channel {channel_id} stopped by {ctx.user.name}.")
     else:
-        await ctx.response.send_message("There is no active AI conversation in this channel to stop.")
+        await ctx.response.send_message(tr(ctx, 'messages.f062e8e0d34d'))
         print(f"Attempted to stop AI chat in {channel_id}, but no active history found.")
 
 @client.command()
@@ -418,9 +457,12 @@ async def sync(ctx: commands.Context):
     Syncs the bot's command list with the Discord server.
     """
     
-    del1 = await ctx.send("Syncing commands...")
-    await client.tree.sync(guild=ctx.guild)  # Sync commands for the specific guild
-    del2 = await ctx.send("Commands synced successfully!")
+    if ctx.author.id not in config.get("moderators", []):
+        return
+    catalog.reload()
+    del1 = await ctx.send(tr(ctx, 'messages.394f77ba6f1e'))
+    await client.tree.sync()  # Commands are registered globally.
+    del2 = await ctx.send(tr(ctx, 'messages.534ac055601d'))
     await asyncio.sleep(5)  # Wait for a few seconds before deleting the message
     await del1.delete()
     await del2.delete()
@@ -430,7 +472,7 @@ async def send_temp_error(ctx: discord.Interaction, message_content: str, error_
             description=message_content,
             color=discord.Color.red()
         )
-        embed.set_footer(text=f"This message will remove in {error_message_lifetime} seconds.")
+        embed.set_footer(text=tr(ctx, 'messages.4672335dc751', value0=error_message_lifetime))
         msg = await ctx.followup.send(embed=embed)
         await asyncio.sleep(error_message_lifetime)
         try:
@@ -462,19 +504,19 @@ class SetImageModal(ui.Modal, title='Set Command Image'):
             json.dump(config, f, indent=4)
 
         update_command_list()
-        await interaction.response.send_message(f"The image for the command `{command}` has been set successfully!")
+        await interaction.response.send_message(tr(interaction, 'messages.92e23b3997d4', value0=command))
 
-@client.tree.command(name='set-image', description='commands.set-image.description')
+@client.tree.command(name=localized('set-image'), description=localized('commands.set-image.description'))
 async def set_image(ctx: discord.Interaction):
     """
     Sets an image for a custom command.
     Requires moderator permissions.
     """
     if ctx.user.id not in config["moderators"]:
-        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        await ctx.response.send_message(tr(ctx, 'messages.a2306eac20cf'), ephemeral=True)
         return
 
-    await ctx.response.send_modal(SetImageModal())
+    await ctx.response.send_modal(localize_modal(SetImageModal(), ctx))
 
 class CooldownModal(ui.Modal, title='Set Channel Cooldown'):
     seconds = ui.Label(
@@ -488,31 +530,31 @@ class CooldownModal(ui.Modal, title='Set Channel Cooldown'):
         try:
             seconds = int(raw_seconds)
         except ValueError:
-            await interaction.response.send_message("Cooldown must be a whole number of seconds.", ephemeral=True)
+            await interaction.response.send_message(tr(interaction, 'messages.597d135caee9'), ephemeral=True)
             return
 
         if seconds < 0:
-            await interaction.response.send_message("Cooldown must be 0 or greater.", ephemeral=True)
+            await interaction.response.send_message(tr(interaction, 'messages.2761a0d99722'), ephemeral=True)
             return
 
         channel_id_str = str(interaction.channel.id)
         _save_channel_command_cooldown(channel_id_str, seconds)
 
         if seconds == 0:
-            await interaction.response.send_message("Cooldown for this channel has been disabled.")
+            await interaction.response.send_message(tr(interaction, 'messages.62391c817f72'))
         else:
-            await interaction.response.send_message(f"Cooldown for this channel has been set to {seconds} seconds.")
+            await interaction.response.send_message(tr(interaction, 'messages.4e341bc30210', value0=seconds))
 
-@client.tree.command(name='cooldown', description='Add in a cooldown for commands to prevent spam.')
+@client.tree.command(name=localized('cooldown'), description=localized('commands.cooldown.description'))
 async def cooldown(ctx: discord.Interaction):
     """
     Sets a cooldown for commands in the current channel.
     """
     if ctx.user.id not in config.get("moderators", []):
-        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        await ctx.response.send_message(tr(ctx, 'messages.a2306eac20cf'), ephemeral=True)
         return
 
-    await ctx.response.send_modal(CooldownModal())
+    await ctx.response.send_modal(localize_modal(CooldownModal(), ctx))
 
 class SystemPromptModal(ui.Modal, title='Set AI System Prompt'):
     prompt = ui.Label(
@@ -523,20 +565,20 @@ class SystemPromptModal(ui.Modal, title='Set AI System Prompt'):
     async def on_submit(self, interaction: discord.Interaction):
         prompt = self.prompt.component.value
         channel_based_message_history[str(interaction.channel.id)] = [{"role": "system", "content": [{"type": "text", "text": prompt}]}]
-        await interaction.response.send_message("System prompt has been set successfully!")
+        await interaction.response.send_message(tr(interaction, 'messages.62256134fb39'))
 
-@client.tree.command(name='system-prompt', description='commands.system-prompt.description')
+@client.tree.command(name=localized('system-prompt'), description=localized('commands.system-prompt.description'))
 async def system_prompt(ctx: discord.Interaction):
     """
     Sets the system prompt for the AI.
     """
     if ctx.user.id not in config.get("moderators", []):
-        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        await ctx.response.send_message(tr(ctx, 'messages.a2306eac20cf'), ephemeral=True)
         return
 
-    await ctx.response.send_modal(SystemPromptModal())
+    await ctx.response.send_modal(localize_modal(SystemPromptModal(), ctx))
 
-@client.tree.command(name='clear', description='commands.clear.description')
+@client.tree.command(name=localized('clear'), description=localized('commands.clear.description'))
 async def clear(ctx: discord.Interaction):
     """
     Clears the channel's message history for the AI chat.
@@ -545,23 +587,23 @@ async def clear(ctx: discord.Interaction):
     channel_id = str(ctx.channel.id)
     if channel_id in channel_based_message_history:
         channel_based_message_history[channel_id] = []
-        await ctx.response.send_message("The message history for this channel has been cleared.")
+        await ctx.response.send_message(tr(ctx, 'messages.5252abb9c73b'))
     else:
-        await ctx.response.send_message("No message history found for this channel.")
+        await ctx.response.send_message(tr(ctx, 'messages.675d7869093b'))
     return
 
-@client.tree.command(name='start-finetuning', description='commands.start-finetuning.description')
+@client.tree.command(name=localized('start-finetuning'), description=localized('commands.start-finetuning.description'))
 async def start_finetuning(ctx: discord.Interaction):
     """
     Starts the finetuning process.
     """
     if ctx.user.id not in config.get("moderators", []):
-        await ctx.followup.send("You do not have permission to use this command.")
+        await ctx.followup.send(tr(ctx, 'messages.a2306eac20cf'))
         return
     await clear(ctx)  # Clear the message history before starting finetuning
-    await ctx.response.send_message("Starting Finetuning.")
+    await ctx.response.send_message(tr(ctx, 'messages.a37dc06700a1'))
 
-@client.tree.command(name='end-finetuning', description='commands.end-finetuning.description')
+@client.tree.command(name=localized('end-finetuning'), description=localized('commands.end-finetuning.description'))
 async def end_finetuning(ctx: discord.Interaction):
     """
     Ends the finetuning process by saving the current channel's chat history to a uniquely named JSON file.
@@ -581,9 +623,9 @@ async def end_finetuning(ctx: discord.Interaction):
     try:
         with open(filename, "w", encoding="utf-8") as f:
             json.dump(history, f, indent=4, ensure_ascii=False)
-        await ctx.response.send_message(f"Finetuning ended. Chat history saved to `{filename}`.")
+        await ctx.response.send_message(tr(ctx, 'messages.8ab15e0300d1', value0=filename))
     except Exception as e:
-        await ctx.response.send_message(f"Failed to save chat history: {e}")
+        await ctx.response.send_message(tr(ctx, 'messages.53b9073afd2e', value0=e))
 
 class EditModal(ui.Modal, title='Edit Last AI Message'):
     new_content = ui.Label(text='New content', component=ui.TextInput(style=discord.TextStyle.paragraph, max_length=2000))
@@ -612,24 +654,24 @@ class EditModal(ui.Modal, title='Edit Last AI Message'):
                 # Save the updated message history to disk (optional: you can choose a filename per channel)
                 with open(f"history_{channel_id}.json", "w", encoding="utf-8") as f:
                     json.dump(channel_based_message_history[channel_id], f, indent=4, ensure_ascii=False)
-                await interaction.response.send_message("The last AI message has been edited and the history has been updated.", ephemeral=True)
+                await interaction.response.send_message(tr(interaction, 'messages.8c0cdd115e03'), ephemeral=True)
             except Exception as e:
-                await interaction.response.send_message(f"Failed to edit the message: {e}", ephemeral=True)
+                await interaction.response.send_message(tr(interaction, 'messages.7af394b227e2', value0=e), ephemeral=True)
             return
 
-        await interaction.response.send_message("No recent AI message found to edit.", ephemeral=True)
+        await interaction.response.send_message(tr(interaction, 'messages.46aed16be2c0'), ephemeral=True)
 
-@client.tree.command(name='edit', description='commands.edit.description')
+@client.tree.command(name=localized('edit'), description=localized('commands.edit.description'))
 async def edit(ctx: discord.Interaction):
     """
     Edits the last message the AI sent in the current channel and updates the channel_based_message_history.
     """
     # Only allow moderators to use this command
     if ctx.user.id not in config.get("moderators", []):
-        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        await ctx.response.send_message(tr(ctx, 'messages.a2306eac20cf'), ephemeral=True)
         return
 
-    await ctx.response.send_modal(EditModal())
+    await ctx.response.send_modal(localize_modal(EditModal(), ctx))
 
 class SetInfoModal(ui.Modal, title='Set Command Info'):
     command_name = ui.Label(text='Command name', component=ui.TextInput(placeholder='e.g. faq', max_length=100))
@@ -641,7 +683,7 @@ class SetInfoModal(ui.Modal, title='Set Command Info'):
 
         conf = config.get(command, None)
         if conf is None:
-            await interaction.response.send_message(f"The command `{command}` does not exist. Use `/make-command` to create it first.", ephemeral=True)
+            await interaction.response.send_message(tr(interaction, 'messages.8140ec54d472', value0=command), ephemeral=True)
             return
 
         conf["info"] = info
@@ -650,19 +692,19 @@ class SetInfoModal(ui.Modal, title='Set Command Info'):
             json.dump(config, f, indent=4)
 
         update_command_list()
-        await interaction.response.send_message(f"The info for the command `{command}` has been set successfully!")
+        await interaction.response.send_message(tr(interaction, 'messages.f59823417005', value0=command))
 
-@client.tree.command(name='set-info', description='commands.set-info.description')
+@client.tree.command(name=localized('set-info'), description=localized('commands.set-info.description'))
 async def set_info(ctx: discord.Interaction):
     """
     Sets the informational text for a custom command.
     Requires moderator permissions.
     """
     if ctx.user.id not in config["moderators"]:
-        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        await ctx.response.send_message(tr(ctx, 'messages.a2306eac20cf'), ephemeral=True)
         return
 
-    await ctx.response.send_modal(SetInfoModal())
+    await ctx.response.send_modal(localize_modal(SetInfoModal(), ctx))
 
 class MakeCommandModal(ui.Modal, title='Create a Custom Command'):
     command_name = ui.Label(text='Command name', component=ui.TextInput(placeholder='e.g. faq', max_length=100))
@@ -683,12 +725,12 @@ class MakeCommandModal(ui.Modal, title='Create a Custom Command'):
         attachments = self.image.component.values
 
         if command in config:
-            await interaction.response.send_message(f"The command `{command}` already exists.", ephemeral=True)
+            await interaction.response.send_message(tr(interaction, 'messages.498171bbf67f', value0=command), ephemeral=True)
             return
 
         has_image = bool(attachments)
         if not has_image and not info:
-            await interaction.response.send_message("You must provide either an info message, an image, or both.", ephemeral=True)
+            await interaction.response.send_message(tr(interaction, 'messages.53b2db8ee7ad'), ephemeral=True)
             return
 
         config[command] = {"info": info, "has_image": has_image}
@@ -706,19 +748,19 @@ class MakeCommandModal(ui.Modal, title='Create a Custom Command'):
             json.dump(config, f, indent=4)
 
         update_command_list()
-        await interaction.response.send_message(f"The command `{command}` has been created successfully!")
+        await interaction.response.send_message(tr(interaction, 'messages.e0d6a1554f93', value0=command))
 
-@client.tree.command(name='make-command', description='commands.make-command.description')
+@client.tree.command(name=localized('make-command'), description=localized('commands.make-command.description'))
 async def make_command(ctx: discord.Interaction):
     """
     Creates a new custom command.
     Requires moderator permissions.
     """
     if ctx.user.id not in config["moderators"]:
-        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        await ctx.response.send_message(tr(ctx, 'messages.a2306eac20cf'), ephemeral=True)
         return
 
-    await ctx.response.send_modal(MakeCommandModal())
+    await ctx.response.send_modal(localize_modal(MakeCommandModal(), ctx))
 
 class RemoveCommandModal(ui.Modal, title='Remove a Custom Command'):
     command_name = ui.Label(text='Command name', component=ui.TextInput(placeholder='e.g. faq', max_length=100))
@@ -727,7 +769,7 @@ class RemoveCommandModal(ui.Modal, title='Remove a Custom Command'):
         command = self.command_name.component.value.strip()
 
         if command not in config:
-            await interaction.response.send_message(f"The command `{command}` does not exist.", ephemeral=True)
+            await interaction.response.send_message(tr(interaction, 'messages.1fb4180af8ba', value0=command), ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -742,28 +784,28 @@ class RemoveCommandModal(ui.Modal, title='Remove a Custom Command'):
                     print(f"Removed image file: {image_path}")
                 except OSError as e:
                     print(f"Error removing image file {image_path}: {e}")
-                    await interaction.followup.send(f"Warning: Failed to delete associated image file: {e}", ephemeral=True)
+                    await interaction.followup.send(tr(interaction, 'messages.303a8545efae', value0=e), ephemeral=True)
 
         with open("config.json", "w") as f:
             json.dump(config, f, indent=4)
 
         update_command_list()
-        await interaction.followup.send(f"The command `{command}` has been removed successfully!", ephemeral=True)
+        await interaction.followup.send(tr(interaction, 'messages.b3509f64cb7f', value0=command), ephemeral=True)
 
-@client.tree.command(name='remove-command', description='commands.remove-command.description')
+@client.tree.command(name=localized('remove-command'), description=localized('commands.remove-command.description'))
 async def remove_command(ctx: discord.Interaction):
     """
     Deletes an existing custom command.
     Requires moderator permissions.
     """
     if ctx.user.id not in config["moderators"]:
-        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        await ctx.response.send_message(tr(ctx, 'messages.a2306eac20cf'), ephemeral=True)
         return
 
-    await ctx.response.send_modal(RemoveCommandModal())
+    await ctx.response.send_modal(localize_modal(RemoveCommandModal(), ctx))
 
-@client.tree.command(name='add-bot-moderator', description='Adds a user as a bot moderator.')
-@app_commands.describe(user="The user to add as a moderator")
+@client.tree.command(name=localized('add-bot-moderator'), description=localized('commands.add-bot-moderator.description'))
+@app_commands.describe(user=localized('commands.add-bot-moderator.user'))
 async def add_bot_moderator(ctx: discord.Interaction, user: discord.User): 
     """
     Adds a user as a bot moderator.
@@ -771,20 +813,20 @@ async def add_bot_moderator(ctx: discord.Interaction, user: discord.User):
     Usage: !add_bot_moderator <@user>
     """
     if ctx.user.id not in config["moderators"]:
-        await ctx.response.send_message("You do not have permission to use this command.")
+        await ctx.response.send_message(tr(ctx, 'messages.a2306eac20cf'))
         return
 
     if user.id in config["moderators"]:
-        await ctx.response.send_message(f"{user.name} is already a moderator.")
+        await ctx.response.send_message(tr(ctx, 'messages.1336f731872d', value0=user.name))
         return
 
     config["moderators"].append(user.id)
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
 
-    await ctx.response.send_message(f"{user.name} has been added as a moderator.")
+    await ctx.response.send_message(tr(ctx, 'messages.925de93b7f3e', value0=user.name))
 
-@client.tree.command(name='moderators', description='Lists all current bot moderators.')
+@client.tree.command(name=localized('moderators'), description=localized('commands.moderators.description'))
 async def moderators(ctx: discord.Interaction): 
     """
     Lists all current bot moderators.
@@ -792,12 +834,12 @@ async def moderators(ctx: discord.Interaction):
     Usage: !moderators
     """
     if ctx.user.id not in config["moderators"]:
-        await ctx.response.send_message("You do not have permission to use this command.")
+        await ctx.response.send_message(tr(ctx, 'messages.a2306eac20cf'))
         return
 
     moderator_ids = config["moderators"]
     if not moderator_ids:
-        await ctx.response.send_message("No moderators have been added yet.")
+        await ctx.response.send_message(tr(ctx, 'messages.7bcc65fd3ae1'))
     else:
         mods = []
         for user_id in moderator_ids:
@@ -808,7 +850,7 @@ async def moderators(ctx: discord.Interaction):
                 mods.append(f"Unknown User (ID: {user_id})")
         moderators_str = "\n".join(mods)
         embed = discord.Embed(
-            title="Current Bot Moderators",
+            title=tr(ctx, 'messages.a191806c6511'),
             description=moderators_str,
             color=discord.Color.blue()
         )
@@ -823,11 +865,11 @@ class RenameCommandModal(ui.Modal, title='Rename a Custom Command'):
         new_name = self.new_name.component.value.strip()
 
         if old_name not in config:
-            await interaction.response.send_message(f"The command `{old_name}` does not exist.", ephemeral=True)
+            await interaction.response.send_message(tr(interaction, 'messages.1fb4180af8ba', value0=old_name), ephemeral=True)
             return
 
         if new_name in config:
-            await interaction.response.send_message(f"The command `{new_name}` already exists.", ephemeral=True)
+            await interaction.response.send_message(tr(interaction, 'messages.498171bbf67f', value0=new_name), ephemeral=True)
             return
 
         config[new_name] = config.pop(old_name)
@@ -853,19 +895,19 @@ class RenameCommandModal(ui.Modal, title='Rename a Custom Command'):
             json.dump(config, f, indent=4)
 
         update_command_list()
-        await interaction.response.send_message(f"The command `{old_name}` has been renamed to `{new_name}` successfully!")
+        await interaction.response.send_message(tr(interaction, 'messages.5170b4798043', value0=old_name, value1=new_name))
 
-@client.tree.command(name='rename-command', description='Renames an existing custom command.')
+@client.tree.command(name=localized('rename-command'), description=localized('commands.rename-command.description'))
 async def rename_command(ctx: discord.Interaction):
     """
     Renames an existing custom command.
     Requires moderator permissions.
     """
     if ctx.user.id not in config["moderators"]:
-        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        await ctx.response.send_message(tr(ctx, 'messages.a2306eac20cf'), ephemeral=True)
         return
 
-    await ctx.response.send_modal(RenameCommandModal())
+    await ctx.response.send_modal(localize_modal(RenameCommandModal(), ctx))
 
 class CommandPaginator(ui.View):
     def __init__(self, interaction: Interaction, command_pages, embed_color, embed_title_prefix, no_results_message, ephemeral: bool):
@@ -878,20 +920,22 @@ class CommandPaginator(ui.View):
         self.embed_title_prefix = embed_title_prefix
         self.no_results_message = no_results_message
         self.ephemeral = ephemeral
+        self.prev_button.label = tr(interaction, "messages.previous-page")
+        self.next_button.label = tr(interaction, "messages.next-page")
 
     def create_embed(self):
         commands_on_page = self.command_pages[self.current_page]
         commands_str = "\n".join(commands_on_page)
 
-        title = self.embed_title_prefix or "Available Commands"
+        title = self.embed_title_prefix or tr(self.interaction, "messages.available-commands")
         description = (
             self.no_results_message
             if not commands_on_page
-            else f"Here are the commands you can use:\n\n{commands_str}"
+            else tr(self.interaction, 'messages.14bd7315c8f8', value0=commands_str)
         )
 
         embed = Embed(title=title, description=description, color=self.embed_color)
-        embed.set_footer(text=f"Page {self.current_page + 1}/{self.total_pages}")
+        embed.set_footer(text=tr(self.interaction, 'messages.6993fcb338ed', value0=self.current_page + 1, value1=self.total_pages))
         return embed
 
     @ui.button(label="◀️ Prev", style=discord.ButtonStyle.secondary)
@@ -914,10 +958,10 @@ class CommandPaginator(ui.View):
         except Exception:
             pass  # In case interaction is already gone
 
-@client.tree.command(name='list-commands', description='Lists all user-defined custom commands.')
+@client.tree.command(name=localized('list-commands'), description=localized('commands.list-commands.description'))
 @app_commands.describe(
-    page_or_filter="Page number or search query (optional)",
-    ephemeral="If true, only you can see the command output (other users cannot see or interact with it). Default: true."
+    page_or_filter=localized('commands.list-commands.page_or_filter'),
+    ephemeral=localized('commands.list-commands.ephemeral')
 )
 @app_commands.rename(page_or_filter="page-or-filter")
 async def list_commands(
@@ -934,22 +978,22 @@ async def list_commands(
     if page_or_filter and not page_or_filter.isdigit():
         search_query = page_or_filter
         commands_to_display_base = autocorrect_command(search_query)
-        embed_title_prefix = f"User-Defined Commands matching '{search_query}'"
-        no_results_message = f"No user-defined commands matching '{search_query}' were found."
+        embed_title_prefix = tr(interaction, 'messages.91bb43580700', value0=search_query)
+        no_results_message = tr(interaction, 'messages.32bcc67e8e07', value0=search_query)
         embed_color = Color.blue()
     else:
         commands_to_display_base = command_list
-        embed_title_prefix = "Available Commands"
-        no_results_message = "It seems there are no user-defined commands to display yet."
+        embed_title_prefix = tr(interaction, 'messages.0e76821e05e4')
+        no_results_message = tr(interaction, 'messages.db92d7a9051e')
         embed_color = Color.green()
 
     if not commands_to_display_base:
         embed = Embed(
-            title="No User-Defined Commands Available" if not page_or_filter else "No Commands Found",
+            title=tr(interaction, 'messages.5c4beb1cc6ae') if not page_or_filter else tr(interaction, 'messages.79b49e5fa886'),
             description=no_results_message,
             color=Color.red()
         )
-        embed.set_footer(text="This message will disappear in 60 seconds.")
+        embed.set_footer(text=tr(interaction, 'messages.8e5223615cec'))
         await interaction.followup.send(embed=embed, ephemeral=ephemeral)
         return
 
@@ -967,20 +1011,20 @@ async def list_commands(
     await interaction.followup.send(embed=view.create_embed(), view=view, ephemeral=ephemeral)
     
 # --- Import Config Command ---
-@client.tree.command(name='import-config', description='Dev use only: Imports a new config.json file, overwriting the current one.')
+@client.tree.command(name=localized('import-config'), description=localized('commands.import-config.description'))
 async def import_config(ctx: discord.Interaction, file: discord.Attachment):
     """Imports a new config.json file, overwriting the current one."""
 
     # Only allow moderators to run this command
     if ctx.user.id not in config.get("moderators", []):
-        await send_temp_error(ctx, "You do not have permission to use this command.")
+        await send_temp_error(ctx, tr(ctx, 'messages.a2306eac20cf'))
         return
     
     try:
         file_bytes = await file.read()
         new_config = json.loads(file_bytes.decode("utf-8"))
     except Exception as e:
-        await send_temp_error(ctx, f"Failed to read config: {e}")
+        await send_temp_error(ctx, tr(ctx, 'messages.85dfd3fd1d62', value0=e))
         return
 
     # Update in-memory config and save to disk
@@ -990,13 +1034,13 @@ async def import_config(ctx: discord.Interaction, file: discord.Attachment):
         json.dump(config, f, indent=4)
 
     update_command_list()
-    await ctx.response.send_message("Configuration imported successfully.")
+    await ctx.response.send_message(tr(ctx, 'messages.759f15649d2f'))
 
-@client.tree.command(name='send-config', description='Dev use only: Sends the current config.json file.')
+@client.tree.command(name=localized('send-config'), description=localized('commands.send-config.description'))
 async def send_config(interaction: discord.Interaction):
     if interaction.user.id not in config.get("moderators", []):
         await interaction.response.send_message(
-            "You do not have permission to use this command.",
+            tr(interaction, 'messages.a2306eac20cf'),
             ephemeral=True
         )
         return
@@ -1009,12 +1053,12 @@ async def send_config(interaction: discord.Interaction):
     except Exception as e:
         if interaction.response.is_done():
             await interaction.followup.send(
-                f"Failed to read config: {e}",
+                tr(interaction, 'messages.85dfd3fd1d62', value0=e),
                 ephemeral=True
             )
         else:
             await interaction.response.send_message(
-                f"Failed to read config: {e}",
+                tr(interaction, 'messages.85dfd3fd1d62', value0=e),
                 ephemeral=True
             )
 
@@ -1037,7 +1081,7 @@ class CreateStickyMessageModal(ui.Modal, title='Create Sticky Message'):
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
 
-        await interaction.response.send_message("Creating sticky message...", ephemeral=True)
+        await interaction.response.send_message(tr(interaction, 'messages.12b8429eef73'), ephemeral=True)
 
         prepend_message = "__**Stickied Message:**__\n\n" if self.prepend else ""
         stick_message = f"{prepend_message}{self.content.component.value}"
@@ -1065,26 +1109,26 @@ class CreateStickyMessageModal(ui.Modal, title='Create Sticky Message'):
             },
         )
 
-@client.tree.command(name="create-sticky-message", description="Creates a sticky message in the current channel.")
-@app_commands.describe(prepend="Whether to prepend the standard sticky header")
+@client.tree.command(name=localized('create-sticky-message'), description=localized('commands.create-sticky-message.description'))
+@app_commands.describe(prepend=localized('commands.create-sticky-message.prepend'))
 async def create_sticky_message(ctx: discord.Interaction, prepend: bool = True):
     """
     Creates a sticky message in the current channel.
     """
     if ctx.user.id not in config.get("moderators", []):
-        await ctx.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        await ctx.response.send_message(tr(ctx, 'messages.a2306eac20cf'), ephemeral=True)
         return
 
-    await ctx.response.send_modal(CreateStickyMessageModal(prepend))
+    await ctx.response.send_modal(localize_modal(CreateStickyMessageModal(prepend), ctx))
 
-@client.tree.command(name="remove-sticky-message", description="Removes the sticky message from the current channel.")
+@client.tree.command(name=localized('remove-sticky-message'), description=localized('commands.remove-sticky-message.description'))
 async def remove_sticky_message(ctx: discord.Interaction):
     """
     Removes the sticky message from the current channel.
     Usage: !remove_sticky_message
     """
     if ctx.user.id not in config.get("moderators", []):
-        await ctx.response.send_message("You do not have permission to use this command.")
+        await ctx.response.send_message(tr(ctx, 'messages.a2306eac20cf'))
         return
 
     channel_id = str(ctx.channel.id)
@@ -1102,9 +1146,9 @@ async def remove_sticky_message(ctx: discord.Interaction):
         config["sticky_messages"].pop(channel_id, None)
         with open("config.json", "w") as f:
             json.dump(config, f, indent=4)
-        await ctx.response.send_message("Sticky message removed successfully.", ephemeral=True)
+        await ctx.response.send_message(tr(ctx, 'messages.3949f5840d61'), ephemeral=True)
     else:
-        await ctx.response.send_message("There is no sticky message to remove in this channel.", ephemeral=True)
+        await ctx.response.send_message(tr(ctx, 'messages.b605debad227'), ephemeral=True)
 
 # --- NEW COMMANDS: Sticky Notes ---
 
@@ -1119,14 +1163,14 @@ async def make_stickynote(ctx: commands.Context, name: str):
     media_dir = "stickynote_media" # Directory to save media files
 
     if ctx.author.id not in config["moderators"]:
-        msg = await ctx.send("You do not have permission to use this command.")
+        msg = await ctx.send(tr(ctx, 'messages.a2306eac20cf'))
         await asyncio.sleep(error_message_lifetime)
         try: await msg.delete()
         except discord.NotFound: pass
         return
 
     if not ctx.message.reference or not ctx.message.reference.message_id:
-        msg = await ctx.send("You must reply to a message to make it a sticky note.")
+        msg = await ctx.send(tr(ctx, 'messages.8f2cdf9435bd'))
         await asyncio.sleep(error_message_lifetime)
         try: await msg.delete()
         except discord.NotFound: pass
@@ -1135,20 +1179,20 @@ async def make_stickynote(ctx: commands.Context, name: str):
     try:
         replied_message = await ctx.channel.fetch_message(ctx.message.reference.message_id)
     except discord.NotFound:
-        msg = await ctx.send("The message you replied to could not be found.")
+        msg = await ctx.send(tr(ctx, 'messages.ef9a35d9bc0a'))
         await asyncio.sleep(error_message_lifetime)
         try: await msg.delete()
         except discord.NotFound: pass
         return
     except discord.HTTPException as e:
-        msg = await ctx.send(f"An error occurred while fetching the replied message: `{e}`")
+        msg = await ctx.send(tr(ctx, 'messages.507e52efdf80', value0=e))
         await asyncio.sleep(error_message_lifetime)
         try: await msg.delete()
         except discord.NotFound: pass
         return
 
     if name in config["stickynotes"]:
-        msg = await ctx.send(f"A sticky note with the name `{name}` already exists. Please choose a different name or remove the existing one.")
+        msg = await ctx.send(tr(ctx, 'messages.65fab3a12901', value0=name))
         await asyncio.sleep(error_message_lifetime)
         try: await msg.delete()
         except discord.NotFound: pass
@@ -1198,7 +1242,7 @@ async def make_stickynote(ctx: commands.Context, name: str):
                 print(f"Error saving sticky note media {attachment.filename}: {e}")
                 note_data["media_url"] = None # Reset if save failed
                 note_data["media_type"] = None
-                await ctx.send(f"Warning: Could not save the attached media for sticky note `{name}`. It will be text-only.")
+                await ctx.send(tr(ctx, 'messages.903ee1e85245', value0=name))
 
     config["stickynotes"][name] = note_data
 
@@ -1206,11 +1250,11 @@ async def make_stickynote(ctx: commands.Context, name: str):
         json.dump(config, f, indent=4)
 
     embed = discord.Embed(
-        title=f"Sticky Note '{name}' Created",
-        description=f"Saved message from {replied_message.author.display_name}:\n>>> {replied_message.content[:500]}{'...' if len(replied_message.content) > 500 else ''}",
+        title=tr(ctx, 'messages.19de6f72881c', value0=name),
+        description=tr(ctx, 'messages.840b7ee6edca', value0=replied_message.author.display_name, value1=replied_message.content[:500], value2='...' if len(replied_message.content) > 500 else ''),
         color=discord.Color.gold()
     )
-    embed.add_field(name="Original Message Link", value=f"[Go to message]({replied_message.jump_url})", inline=False)
+    embed.add_field(name=tr(ctx, 'messages.4719c6c82b5f'), value=tr(ctx, 'messages.ac3b3a7d2e13', value0=replied_message.jump_url), inline=False)
     if note_data["media_url"] and note_data["media_type"] == "image":
         embed.set_image(url=f"attachment://{os.path.basename(note_data['media_url'])}") # Use attachment for local file
     
@@ -1232,7 +1276,7 @@ async def list_stickynote(ctx: commands.Context, *, page_or_filter: str = None):
     error_message_lifetime = 30
 
     if ctx.author.id not in config["moderators"]:
-        msg = await ctx.send("You do not have permission to use this command.")
+        msg = await ctx.send(tr(ctx, 'messages.a2306eac20cf'))
         await asyncio.sleep(error_message_lifetime)
         try: await msg.delete()
         except discord.NotFound: pass
@@ -1244,14 +1288,14 @@ async def list_stickynote(ctx: commands.Context, *, page_or_filter: str = None):
     if page_or_filter and not page_or_filter.isdigit():
         search_query = page_or_filter.lower()
         commands_to_display_base = [name for name in all_stickynote_names if search_query in name.lower()]
-        embed_title_prefix = f"Sticky Notes matching '{search_query}'"
-        no_results_message = f"No sticky notes matching '{search_query}' were found."
+        embed_title_prefix = tr(ctx, 'messages.690d07dc5375', value0=search_query)
+        no_results_message = tr(ctx, 'messages.9756e6a8347d', value0=search_query)
         initial_page_index = 0
         embed_color = discord.Color.purple()
     else:
         commands_to_display_base = all_stickynote_names
-        embed_title_prefix = "All Sticky Notes"
-        no_results_message = "It seems there are no sticky notes saved yet."
+        embed_title_prefix = tr(ctx, 'messages.0bdba34cc33d')
+        no_results_message = tr(ctx, 'messages.b18ebbb80ad0')
         embed_color = discord.Color.gold()
         initial_page_index = 0
 
@@ -1264,11 +1308,11 @@ async def list_stickynote(ctx: commands.Context, *, page_or_filter: str = None):
 
     if not commands_to_display_base:
         embed = discord.Embed(
-            title="No Sticky Notes Available" if not page_or_filter else "No Sticky Notes Found",
+            title=tr(ctx, 'messages.b32965ee73bf') if not page_or_filter else tr(ctx, 'messages.23aefc21ef06'),
             description=no_results_message,
             color=discord.Color.red()
         )
-        embed.set_footer(text="This message will disappear in 60 seconds.")
+        embed.set_footer(text=tr(ctx, 'messages.8e5223615cec'))
         msg = await ctx.send(embed=embed)
         await asyncio.sleep(60)
         try: await msg.delete()
@@ -1280,23 +1324,23 @@ async def list_stickynote(ctx: commands.Context, *, page_or_filter: str = None):
     current_page = initial_page_index
     if not (0 <= current_page < num_pages):
         current_page = 0
-        embed_title_prefix = "Invalid Page Number"
-        no_results_message = f"Page number must be between 1 and {num_pages}. Showing page 1 instead."
+        embed_title_prefix = tr(ctx, 'messages.4927084d051f')
+        no_results_message = tr(ctx, 'messages.9f10ba41537d', value0=num_pages)
         embed_color = discord.Color.red()
 
 
     def create_stickynote_embed(page_idx, total_pages_count, current_names_list, initial_color, title_prefix, no_results_msg):
         if not current_names_list or not (0 <= page_idx < len(current_names_list)):
             return discord.Embed(
-                title="Error Displaying Sticky Notes",
-                description="Could not find sticky notes for this page.",
+                title=tr(ctx, 'messages.8bdf9b0df0ac'),
+                description=tr(ctx, 'messages.d16708f7e5ca'),
                 color=discord.Color.red()
             )
 
         names_on_page = current_names_list[page_idx]
         
         description_lines = []
-        if title_prefix == "Invalid Page Number":
+        if title_prefix == tr(ctx, "messages.4927084d051f"):
             description_lines.append(no_results_msg)
             description_lines.append("\n")
 
@@ -1319,7 +1363,7 @@ async def list_stickynote(ctx: commands.Context, *, page_or_filter: str = None):
             description="\n".join(description_lines),
             color=initial_color
         )
-        embed.set_footer(text=f"Page {page_idx + 1}/{total_pages_count} | React to navigate. This message will expire in 60 seconds.")
+        embed.set_footer(text=tr(ctx, 'messages.2c0970e8e484', value0=page_idx + 1, value1=total_pages_count))
         return embed
 
     message = await ctx.send(embed=create_stickynote_embed(current_page, num_pages, command_pages, embed_color, embed_title_prefix, no_results_message))
@@ -1361,7 +1405,7 @@ async def list_stickynote(ctx: commands.Context, *, page_or_filter: str = None):
             try:
                 await message.clear_reactions()
                 expired_embed = create_stickynote_embed(current_page, num_pages, command_pages, embed_color, embed_title_prefix, no_results_message)
-                expired_embed.set_footer(text="This command navigation has expired.")
+                expired_embed.set_footer(text=tr(ctx, 'messages.f09f85d24594'))
                 expired_embed.color = discord.Color.greyple()
                 await message.edit(embed=expired_embed)
             except discord.HTTPException:
@@ -1381,7 +1425,7 @@ async def remove_stickynote(ctx: commands.Context, name: str):
     error_message_lifetime = 30
 
     if ctx.author.id not in config["moderators"]:
-        msg = await ctx.send("You do not have permission to use this command.")
+        msg = await ctx.send(tr(ctx, 'messages.a2306eac20cf'))
         await asyncio.sleep(error_message_lifetime)
         try: await msg.delete()
         except discord.NotFound: pass
@@ -1408,7 +1452,7 @@ async def remove_stickynote(ctx: commands.Context, name: str):
                         break
 
     if not matched_name:
-        msg = await ctx.send(f"Sticky note `{name}` does not exist.")
+        msg = await ctx.send(tr(ctx, 'messages.98a64ae98d5b', value0=name))
         await asyncio.sleep(error_message_lifetime)
         try: await msg.delete()
         except discord.NotFound: pass
@@ -1428,7 +1472,7 @@ async def remove_stickynote(ctx: commands.Context, name: str):
     with open("config.json", "w") as f:
         json.dump(config, f, indent=4)
 
-    await ctx.send(f"Sticky note `{matched_name}` has been successfully removed.")
+    await ctx.send(tr(ctx, 'messages.21ec5d1a02dc', value0=matched_name))
 
 # --- NEW COMMAND: !stickynote ---
 @client.command(name='stickynote')
@@ -1462,7 +1506,7 @@ async def stickynote(ctx: commands.Context, name: str):
     note_data = config["stickynotes"].get(matched_name) if matched_name else None
 
     if not note_data:
-        msg = await ctx.send(f"Sticky note `{name}` not found. Use `!list_stickynote` to see available notes.")
+        msg = await ctx.send(tr(ctx, 'messages.612be7d32e0c', value0=name))
         await asyncio.sleep(error_message_lifetime)
         try: await msg.delete()
         except discord.NotFound: pass
@@ -1471,13 +1515,13 @@ async def stickynote(ctx: commands.Context, name: str):
     jump_url = f"https://discord.com/channels/{ctx.guild.id}/{note_data['channel_id']}/{note_data['message_id']}"
 
     embed = discord.Embed(
-        title=f"Sticky Note: '{matched_name}'",
+        title=tr(ctx, 'messages.a1006ca1247a', value0=matched_name),
         description=note_data['content'],
         color=discord.Color.gold()
     )
-    embed.add_field(name="Original Author:", value=note_data['author_name'], inline=True)
-    embed.add_field(name="Date:", value=f"<t:{int(datetime.fromisoformat(note_data['timestamp']).timestamp())}:F>", inline=True)
-    embed.add_field(name="Original Message Link:", value=f"[Click to jump]({jump_url})", inline=False) # Direct link
+    embed.add_field(name=tr(ctx, 'messages.d35458203085'), value=note_data['author_name'], inline=True)
+    embed.add_field(name=tr(ctx, 'messages.b51489bde8d8'), value=tr(ctx, 'messages.f4e976a28259', value0=int(datetime.fromisoformat(note_data['timestamp']).timestamp())), inline=True)
+    embed.add_field(name=tr(ctx, 'messages.bb0145fb8aad'), value=tr(ctx, 'messages.d3afff8c26ad', value0=jump_url), inline=False) # Direct link
 
     files_to_send = []
     if note_data.get("media_url") and os.path.exists(note_data["media_url"]):
@@ -1493,11 +1537,28 @@ async def stickynote(ctx: commands.Context, name: str):
         elif file_type in ["audio", "video"]:
             filename = os.path.basename(file_path)
             files_to_send.append(discord.File(file_path, filename=filename))
-            embed.add_field(name="Attached Media", value=f"Contains an attached {file_type} file: `{filename}`", inline=False)
+            embed.add_field(name=tr(ctx, 'messages.9b4764c39549'), value=tr(ctx, 'messages.7da7f6d4d4cc', value0=file_type, value1=filename), inline=False)
     elif note_data.get("media_url") and not os.path.exists(note_data["media_url"]):
-        embed.set_footer(text="Note: Associated media file not found on server.")
+        embed.set_footer(text=tr(ctx, 'messages.0633e9dd21c9'))
 
     await ctx.send(embed=embed, files=files_to_send if files_to_send else None)
+
+@client.tree.command(name=localized("channel-language"), description=localized("commands.channel-language.description"))
+@app_commands.describe(language=localized("commands.channel-language.language"))
+@app_commands.choices(language=[app_commands.Choice(name=name, value=code) for code, name in LANGUAGES.items()])
+async def channel_language(interaction: discord.Interaction, language: str):
+    if interaction.user.id not in config.get("moderators", []):
+        await interaction.response.send_message(tr(interaction, "messages.permission-denied"), ephemeral=True)
+        return
+    if language not in LANGUAGES:
+        await interaction.response.send_message("Unsupported language.", ephemeral=True)
+        return
+    config.setdefault("channel_languages", {})[str(interaction.channel_id)] = language
+    with open("config.json", "w") as file:
+        json.dump(config, file, indent=4)
+    await interaction.response.send_message(
+        tr(interaction, "messages.channel-language-set", language=LANGUAGES[language]), ephemeral=True)
+
 
 async def setup_hook():
     print("setup hook called")
@@ -1507,4 +1568,5 @@ async def setup_hook():
 
 client.setup_hook = setup_hook
 
-client.run(token)
+if __name__ == "__main__":
+    client.run(token)
