@@ -215,6 +215,13 @@ STOP_MESSAGES = [
     "OK, I was gagged by that.",
 ]
 
+def _sticky_embed(content: str) -> Embed:
+    prefix = "__**Stickied Message:**__\n\n"
+    title = "Stickied Message" if content.startswith(prefix) else None
+    description = content[len(prefix):] if title else content
+    return Embed(title=title, description=description, color=Color.blue())
+
+
 async def _do_sticky_repost(channel_id_str: str, channel: discord.TextChannel, trigger_time: float):
     current_task = asyncio.current_task()
     sticky_data = sticky_messages.get(channel_id_str)
@@ -241,25 +248,18 @@ async def _do_sticky_repost(channel_id_str: str, channel: discord.TextChannel, t
             try:
                 fetched = await channel.fetch_message(sticky_message_id)
                 await fetched.delete()
-                new_message = await channel.send(fetched.content)
-                _save_sticky_message(
-                    channel_id_str,
-                    {
-                        "content": fetched.content,
-                        "message_id": new_message.id,
-                        "timeout_seconds": sticky_data.get("timeout_seconds", 0.0),
-                    },
-                )
             except discord.NotFound:
-                new_message = await channel.send(sticky_message)
-                _save_sticky_message(
-                    channel_id_str,
-                    {
-                        "content": sticky_message,
-                        "message_id": new_message.id,
-                        "timeout_seconds": sticky_data.get("timeout_seconds", 0.0),
-                    },
-                )
+                pass
+            # Embed messages have empty .content; the saved text is the source.
+            new_message = await channel.send(embed=_sticky_embed(sticky_message))
+            _save_sticky_message(
+                channel_id_str,
+                {
+                    "content": sticky_message,
+                    "message_id": new_message.id,
+                    "timeout_seconds": sticky_data.get("timeout_seconds", 0.0),
+                },
+            )
     except asyncio.CancelledError:
         return
     finally:
@@ -1098,7 +1098,7 @@ class CreateStickyMessageModal(ui.Modal, title='Create Sticky Message'):
             except discord.NotFound:
                 pass
 
-        message = await interaction.channel.send(stick_message)
+        message = await interaction.channel.send(embed=_sticky_embed(stick_message))
 
         _save_sticky_message(
             channel_id,
