@@ -10,11 +10,14 @@ Restart the bot to register `/changelog` through its existing startup command sy
 | `/changelog since:alpha` | Changes from the latest alpha to the current release. |
 | `/changelog since:beta` | Changes from the latest beta to the current release. |
 | `/changelog since:stable` | Changes from the latest stable release to the current release. |
+| `/changelog since:0.1.575-beta to:0.1.576` | Changes between those two releases. |
+| `/changelog to:0.1.576` | Changes from the release immediately before 0.1.576 to 0.1.576. |
 
-The current release is the most recently published release across all channels,
-including prereleases. The default baseline is the release published immediately
-before it. Unreleased commits on master are excluded. An explicit starting release
-that is already the current release produces an empty changelog.
+The optional `to` parameter accepts a version or alpha/beta/stable. It defaults
+to the most recently published release across all channels, including prereleases.
+When `since` is omitted, the baseline is the release published immediately before
+the selected target (across all channels). Unreleased commits on master are excluded. An explicit starting release
+that is already the target release produces an empty changelog.
 
 Version inputs must match an existing published release. Three- and four-part
 versions are supported, with an optional `v` prefix and alpha/beta/stable suffix.
@@ -34,6 +37,6 @@ GitHub requests use `aiohttp` (also installed by `discord.py`). An optional
 `GITHUB_TOKEN` environment variable enables authenticated GitHub rate limits;
 the public repository does not require a token. Requests have timeouts and a
 15-second per-user cooldown. Missing releases, rate limits, and releases that
-are not ancestors of the current release produce explanatory errors instead of partial logs.
+are not ancestors of the target release produce explanatory errors instead of partial logs.
 
 Validation: `python -m unittest discover -s tests -v` from the bot directory.

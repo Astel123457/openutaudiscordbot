@@ -173,6 +173,7 @@
   "messages.available-commands": "Available Commands",
   "messages.previous-page": "◀️ Prev",
   "messages.next-page": "▶️ Next",
-  "commands.changelog.description": "Show changes from the previous release or a chosen version/channel to the current release.",
-  "commands.changelog.since": "Starting version or alpha/beta/stable; omit to compare the previous and current releases."
+  "commands.changelog.description": "Compare OpenUtau releases; defaults to the previous and latest published releases.",
+  "commands.changelog.since": "Starting version or alpha/beta/stable; omit for the release immediately before the target.",
+  "commands.changelog.to": "Target version or alpha/beta/stable; defaults to the latest published release."
 }

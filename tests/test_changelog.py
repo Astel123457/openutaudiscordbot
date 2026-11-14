@@ -47,6 +47,42 @@ class ChangelogTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ChangelogError, 'previous published release'):
             await api.changelog()
 
+    async def test_explicit_target_version_channel_and_default_baseline(self):
+        releases = [release('0.1.577-alpha', prerelease=True, date='2026-11-03'),
+                    release('0.1.576', date='2026-11-02'),
+                    release('0.1.575-beta', prerelease=True, date='2026-11-01')]
+        for since, to in [('0.1.575-beta', ' V0.1.576 '),
+                          ('beta', 'stable'), (None, '0.1.576')]:
+            with self.subTest(since=since, to=to):
+                api = GitHub(None)
+                api.get = AsyncMock(side_effect=[releases, commit(2), commit(1),
+                    {'status': 'ahead', 'commits': [commit(2)], 'total_commits': 1}])
+                result = await api.changelog(since, to)
+                self.assertEqual(result.label, '0.1.575-beta → 0.1.576')
+                self.assertEqual(api.get.await_args_list[1].args[0], '/commits/0.1.576')
+                self.assertEqual(api.get.await_args_list[2].args[0], '/commits/0.1.575-beta')
+
+    async def test_target_without_predecessor_or_unknown_target(self):
+        for target in ('0.1.565', '0.1.999'):
+            api = GitHub(None)
+            api.get = AsyncMock(return_value=[release('0.1.565')])
+            with self.assertRaises(ChangelogError):
+                await api.changelog(to=target)
+
+    async def test_slash_command_exposes_and_forwards_target(self):
+        from changelog import register_changelog
+        client = discord.Client(intents=discord.Intents.none())
+        tree = discord.app_commands.CommandTree(client)
+        register_changelog(tree)
+        command = tree.get_command('changelog')
+        self.assertEqual([p.name for p in command.parameters], ['since', 'to'])
+        self.assertTrue(all(not p.required and p.autocomplete for p in command.parameters))
+        interaction = SimpleNamespace()
+        with patch('changelog.send_changelog', new=AsyncMock()) as send:
+            await command.callback(interaction, '0.1.575-beta', '0.1.576')
+            send.assert_awaited_once_with(interaction, '0.1.575-beta', '0.1.576')
+        await client.close()
+
     async def test_default_without_releases_reports_error(self):
         api = GitHub(None)
         api.get = AsyncMock(return_value=[])
@@ -141,8 +177,9 @@ class ChangelogTests(unittest.IsolatedAsyncioTestCase):
                                       user=SimpleNamespace(id=1), locale=discord.Locale.american_english)
         result = Changelog('Since 0.1.565', 'https://example.com', 'f' * 40,
                            [commit(i) for i in range(100)])
-        with patch('changelog.fetch_changelog', return_value=result):
-            await send_changelog(interaction)
+        with patch('changelog.fetch_changelog', return_value=result) as fetch:
+            await send_changelog(interaction, '0.1.575-beta', '0.1.576')
+            fetch.assert_awaited_once_with('0.1.575-beta', '0.1.576')
         interaction.response.defer.assert_awaited_once_with(thinking=True)
         sent = interaction.followup.send.call_args.kwargs
         self.assertEqual(sent['files'][0].fp.getvalue(), result.attachment())

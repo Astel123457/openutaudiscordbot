@@ -138,10 +138,18 @@ class GitHub:
             raise ChangelogError("A previous published release is required to show changes between releases.")
         return matches[1 if previous else 0]
 
-    async def changelog(self, since=None):
+    async def changelog(self, since=None, to=None):
         selector = (since or "").strip().casefold()
-        current = await self.release("")
-        release = await self.release(selector, previous=not selector)
+        target = (to or "").strip().casefold()
+        current = await self.release(target)
+        if not selector and target:
+            releases = await self.published_releases()
+            index = next(i for i, item in enumerate(releases) if item["tag_name"] == current["tag_name"])
+            if index + 1 == len(releases):
+                raise ChangelogError("A previous published release is required to show changes between releases.")
+            release = releases[index + 1]
+        else:
+            release = await self.release(selector, previous=not selector)
         head = await self.get("/commits/" + quote(current["tag_name"], safe=""))
         base = await self.get("/commits/" + quote(release["tag_name"], safe=""))
         comparison = f"{base['sha']}...{head['sha']}"
@@ -149,7 +157,7 @@ class GitHub:
         while True:
             data = await self.get("/compare/" + comparison, per_page=100, page=page)
             if data["status"] in ("diverged", "behind"):
-                raise ChangelogError("The starting release is not an ancestor of the current release; a complete release comparison cannot be produced.")
+                raise ChangelogError("The starting release is not an ancestor of the target release. Choose a starting release that precedes 'to'.")
             commits.extend(data["commits"])
             if len(commits) >= data["total_commits"]:
                 break
@@ -159,14 +167,14 @@ class GitHub:
         return Changelog(f"{release['tag_name']} → {current['tag_name']}", f"{REPOSITORY}/compare/{comparison}", head["sha"], commits)
 
 
-async def fetch_changelog(since=None):
+async def fetch_changelog(since=None, to=None):
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "OpenUtau-Discord-Bot",
                "X-GitHub-Api-Version": "2022-11-28"}
     if os.environ.get("GITHUB_TOKEN"):
         headers["Authorization"] = "Bearer " + os.environ["GITHUB_TOKEN"]
     try:
         async with aiohttp.ClientSession(headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as session:
-            return await asyncio.wait_for(GitHub(session).changelog(since), timeout=120)
+            return await asyncio.wait_for(GitHub(session).changelog(since, to), timeout=120)
     except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
         raise ChangelogError("GitHub could not be reached in time. Please try again later.") from exc
 
@@ -220,10 +228,10 @@ class ChangelogView(discord.ui.View):
                 pass
 
 
-async def send_changelog(interaction, since=None):
+async def send_changelog(interaction, since=None, to=None):
     await interaction.response.defer(thinking=True)
     try:
-        result = await fetch_changelog(since)
+        result = await fetch_changelog(since, to)
     except ChangelogError as exc:
         await interaction.followup.send(str(exc), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
         return
@@ -244,11 +252,13 @@ async def send_changelog(interaction, since=None):
 
 def register_changelog(tree):
     @tree.command(name="changelog", description=localized("commands.changelog.description"))
-    @app_commands.describe(since=localized("commands.changelog.since"))
+    @app_commands.describe(since=localized("commands.changelog.since"), to=localized("commands.changelog.to"))
     @app_commands.checks.cooldown(1, 15, key=lambda interaction: interaction.user.id)
-    async def changelog(interaction: discord.Interaction, since: app_commands.Range[str, 1, 100] = None):
-        await send_changelog(interaction, since)
+    async def changelog(interaction: discord.Interaction, since: app_commands.Range[str, 1, 100] = None,
+                        to: app_commands.Range[str, 1, 100] = None):
+        await send_changelog(interaction, since, to)
 
+    @changelog.autocomplete("to")
     @changelog.autocomplete("since")
     async def autocomplete(interaction, current):
         return [app_commands.Choice(name=channel, value=channel)
