@@ -251,7 +251,7 @@ async def _do_sticky_repost(channel_id_str: str, channel: discord.TextChannel, t
             except discord.NotFound:
                 pass
             # Embed messages have empty .content; the saved text is the source.
-            new_message = await channel.send(embed=_sticky_embed(sticky_message))
+            new_message = await channel.send(embed=_sticky_embed(sticky_message), silent=True)
             _save_sticky_message(
                 channel_id_str,
                 {
@@ -1098,7 +1098,7 @@ class CreateStickyMessageModal(ui.Modal, title='Create Sticky Message'):
             except discord.NotFound:
                 pass
 
-        message = await interaction.channel.send(embed=_sticky_embed(stick_message))
+        message = await interaction.channel.send(embed=_sticky_embed(stick_message), silent=True)
 
         _save_sticky_message(
             channel_id,
