@@ -29,8 +29,7 @@ async def report_message(message, mistral, enabled):
             label = discord.utils.escape_markdown(discord.utils.escape_mentions(name))
             score = (result.category_scores or {}).get(name)
             lines.append(f'• {label}' + (f' (score: {score:.3f})' if score is not None else ''))
-        embed = discord.Embed(title='Mistral moderation test', description='\n'.join(lines), color=discord.Color.orange())
-        embed.set_footer(text=f'{MODEL} • Model classification only; no moderation action taken.')
+        embed = discord.Embed(title='Message flagged! Reason(s) listed below', description='\n'.join(lines), color=discord.Color.orange())
         await message.reply(embed=embed, mention_author=False, allowed_mentions=discord.AllowedMentions.none(), silent=True)
     except Exception as exc:
         # Do not print exception bodies: SDK errors may include the original message.
