@@ -9,7 +9,7 @@ from string import Formatter
 
 ROOT = Path(__file__).resolve().parent
 LANGUAGES = {"en-US": "English", "ja": "日本語"}
-RESERVED_CONFIG = {"moderators", "stickynotes", "sticky_messages", "channel_command_cooldowns", "channel_languages"}
+RESERVED_CONFIG = {"moderators", "stickynotes", "sticky_messages", "channel_command_cooldowns", "channel_languages", "moderation_channels"}
 
 
 def locale_code(locale):

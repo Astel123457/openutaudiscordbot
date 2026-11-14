@@ -18,6 +18,7 @@ import uuid
 import hashlib
 from ai_support import DiscordReply, HelpTools, stream_answer
 from changelog import register_changelog
+from moderation import register_moderation
 
 # --- Configuration and Initialization ---
 token = sec.discord_token
@@ -180,7 +181,7 @@ INTERNAL_COMMANDS = ["make_command", "set_info", "set_image", "moderators",
                          "list_commands", "bot_config", "bot_commands", "edit",
                          "clear", "start_finetuning", "end_finetuning", "import_config",
                          "make_stickynote", "list_stickynote", "remove_stickynote", "stickynote",
-                         "stop", "channel_languages", "sticky_messages", "channel_command_cooldowns"]
+                         "stop", "moderation", "moderation_channels", "channel_languages", "sticky_messages", "channel_command_cooldowns"]
 
 def update_command_list():
     """Updates the global command_list from the current config."""
@@ -204,6 +205,12 @@ client = commands.Bot(command_prefix='!', intents=intents, status=discord.Status
                       activity=discord.Activity(type=discord.ActivityType.custom, name="Use !help or ping me!"))
 client.remove_command("help")
 register_changelog(client.tree)
+
+def _save_moderation_config():
+    with open("config.json", "w") as file:
+        json.dump(config, file, indent=4)
+
+register_moderation(client, mistral_client, lambda: config, _save_moderation_config)
 
 # List of random messages for the !stop command
 STOP_MESSAGES = [
