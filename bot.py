@@ -19,6 +19,7 @@ import hashlib
 from ai_support import DiscordReply, HelpTools, stream_answer
 from changelog import register_changelog
 from moderation import register_moderation
+from reaction_delete import register_reaction_delete
 
 # --- Configuration and Initialization ---
 token = sec.discord_token
@@ -205,6 +206,7 @@ client = commands.Bot(command_prefix='!', intents=intents, status=discord.Status
                       activity=discord.Activity(type=discord.ActivityType.custom, name="Use !help or ping me!"))
 client.remove_command("help")
 register_changelog(client.tree)
+register_reaction_delete(client, lambda: config)
 
 def _save_moderation_config():
     with open("config.json", "w") as file:
@@ -1385,6 +1387,7 @@ async def list_stickynote(ctx: commands.Context, *, page_or_filter: str = None):
     def check_reaction(reaction, user):
         return (user == ctx.author and
                 str(reaction.emoji) in ["◀️", "▶️", "❌"] and
+                (str(reaction.emoji) != "❌" or user.id in config.get("moderators", [])) and
                 reaction.message.id == message.id)
 
     while True:
@@ -1401,7 +1404,12 @@ async def list_stickynote(ctx: commands.Context, *, page_or_filter: str = None):
             elif str(reaction.emoji) == "◀️":
                 current_page = (current_page - 1 + num_pages) % num_pages
             elif str(reaction.emoji) == "❌":
-                await message.delete()
+                if user.id not in config.get("moderators", []):
+                    continue
+                try:
+                    await message.delete()
+                except discord.NotFound:
+                    pass  # The raw reaction listener may have already deleted it.
                 print("Sticky note interaction closed by user.")
                 return
 
