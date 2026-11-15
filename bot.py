@@ -412,7 +412,7 @@ async def on_message(message: discord.Message):
         )
 
     # Handle bot mentions
-    if client.user.mentioned_in(message):
+    if client.user.mentioned_in(message) and not message.type == discord.MessageType.reply:
         embed = discord.Embed(title=tr(message, 'messages.334d016f755c'), description=tr(message, 'messages.2f99eb3b5d52'), color=0x00ff00)
         embed.add_field(name=tr(message, 'messages.d00eca1bae67'), value="https://github.com/stakira/OpenUtau/wiki/Getting-Started", inline=False)
         embed.add_field(name=tr(message, 'messages.a3d458e1bd1e'), value="https://github.com/stakira/OpenUtau/wiki/FAQ", inline=False)
