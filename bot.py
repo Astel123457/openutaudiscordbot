@@ -327,7 +327,7 @@ async def on_message(message: discord.Message):
     if message.author == client.user:
         return
     
-    message_timestamps.append(time.time())
+    message_queue.append(time.time())
 
     starts_with_prefix = message.content.startswith('=')
     if starts_with_prefix:
