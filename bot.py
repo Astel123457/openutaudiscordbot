@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 from discord import ui, Interaction, Embed, Color
 from discord import app_commands
+from collections import deque
 import asyncio
 from difflib import get_close_matches
 import os
@@ -71,6 +72,7 @@ def _normalize_sticky_message_config(sticky_config):
         "content": content,
         "message_id": message_id,
         "timeout_seconds": max(float(timeout_seconds), 0.0),
+        "limit": msg_limit
     }
 
 
@@ -156,6 +158,10 @@ def localize_modal(modal, interaction):
                     setattr(item, attribute, translate(value, limit))
     return modal
 
+# Message Throughput Queues
+ROLLING_WINDOW_SEC = 20
+SLOWMODE_INTERVAL = 20
+message_queue = deque()
 
 # Stop flag for AI Chatbot
 stop_flag = {}
@@ -238,9 +244,28 @@ async def _do_sticky_repost(channel_id_str: str, channel: discord.TextChannel, t
         return
 
     timeout_seconds = sticky_data.get("timeout_seconds", 0.0)
+    try:
+        limit_msg = sticky_data.get("limit")
+    except:
+        limit_msg = False
 
     try:
-        await asyncio.sleep(timeout_seconds if timeout_seconds > 0 else 0.3)
+        if limit_msg:
+            now = time.time()
+
+            while message_queue and (now - message_queue[0]) > ROLLING_WINDOW_SEC:
+                message_queue.popleft()
+            
+            msg_throughput = (len(message_queue) / ROLLING_WINDOW_SEC) * 60 # Messages per Minute
+            if msg_throughput < 5:
+                return
+            elif msg_throughput > 20:
+                await asyncio.sleep(timeout_seconds if timeout_seconds > 0 else 0.3)
+            else:
+                await asyncio.sleep((timeout_seconds * 5) if timeout_seconds > 0 else 0.3)
+
+        else:
+            await asyncio.sleep(timeout_seconds if timeout_seconds > 0 else 0.3)
         # If a newer message arrived during our sleep, let that task handle the repost
         if sticky_last_message_time.get(channel_id_str) != trigger_time:
             return
@@ -267,6 +292,7 @@ async def _do_sticky_repost(channel_id_str: str, channel: discord.TextChannel, t
                     "content": sticky_message,
                     "message_id": new_message.id,
                     "timeout_seconds": sticky_data.get("timeout_seconds", 0.0),
+                    "limit": msg_limit
                 },
             )
     except asyncio.CancelledError:
@@ -296,6 +322,8 @@ async def on_message(message: discord.Message):
     if message.author == client.user:
         return
     
+    message_timestamps.append(time.time())
+
     starts_with_prefix = message.content.startswith('=')
     if starts_with_prefix:
         if not message.author.id in config.get("moderators", []):
@@ -1079,9 +1107,10 @@ class CreateStickyMessageModal(ui.Modal, title='Create Sticky Message'):
         component=ui.TextInput(default='0', required=False, max_length=20),
     )
 
-    def __init__(self, prepend: bool):
+    def __init__(self, prepend: bool, msg_limit: bool):
         super().__init__()
         self.prepend = prepend
+        self.msg_limit = msg_limit
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -1115,12 +1144,13 @@ class CreateStickyMessageModal(ui.Modal, title='Create Sticky Message'):
                 "content": stick_message,
                 "message_id": message.id,
                 "timeout_seconds": timeout_seconds,
+                "limit": msg_limit
             },
         )
 
 @client.tree.command(name=localized('create-sticky-message'), description=localized('commands.create-sticky-message.description'))
 @app_commands.describe(prepend=localized('commands.create-sticky-message.prepend'))
-async def create_sticky_message(ctx: discord.Interaction, prepend: bool = True):
+async def create_sticky_message(ctx: discord.Interaction, prepend: bool = True, msg_limit: bool = False):
     """
     Creates a sticky message in the current channel.
     """
@@ -1128,7 +1158,7 @@ async def create_sticky_message(ctx: discord.Interaction, prepend: bool = True):
         await ctx.response.send_message(tr(ctx, 'messages.a2306eac20cf'), ephemeral=True)
         return
 
-    await ctx.response.send_modal(localize_modal(CreateStickyMessageModal(prepend), ctx))
+    await ctx.response.send_modal(localize_modal(CreateStickyMessageModal(prepend, msg_limit), ctx))
 
 @client.tree.command(name=localized('remove-sticky-message'), description=localized('commands.remove-sticky-message.description'))
 async def remove_sticky_message(ctx: discord.Interaction):
