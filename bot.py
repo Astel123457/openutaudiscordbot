@@ -67,6 +67,11 @@ def _normalize_sticky_message_config(sticky_config):
         content = sticky_config[0] if len(sticky_config) > 0 else ""
         message_id = sticky_config[1] if len(sticky_config) > 1 else None
         timeout_seconds = sticky_config[2] if len(sticky_config) > 2 else 0.0
+    try:
+        msg_limit = sticky_config.get("limit")
+    except:
+        msg_limit = False
+
 
     return {
         "content": content,
