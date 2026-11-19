@@ -257,7 +257,7 @@ async def _do_sticky_repost(channel_id_str: str, channel: discord.TextChannel, t
                 message_queue.popleft()
             
             msg_throughput = (len(message_queue) / ROLLING_WINDOW_SEC) * 60 # Messages per Minute
-            if msg_throughput == 0:
+            if msg_throughput < 0:
                 return
             elif msg_throughput > 20:
                 await asyncio.sleep(timeout_seconds if timeout_seconds > 0 else 0.3)
